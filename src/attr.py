@@ -1,13 +1,13 @@
 #! /usr/bin/env python
 import rospy
-from cohan_msgs.msg import TrajectoryStamped, AgentTrajectoryArray, TrackedAgents
+from cohan_msgs.msg import Trajectory, AgentTrajectoryArray, TrackedAgents
 import numpy as np
 
 class cohan_attr:
     def __init__(self):
         self.last_agent_data = rospy.Time.now()
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
-        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , TrajectoryStamped , self.robot_cb)
+        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
 
     def agent_cb(self, data):
         self.agent_trajs_arr = []
@@ -19,7 +19,7 @@ class cohan_attr:
             for i , points in enumerate(agent_traj.trajectory.points ):
                 if points.time_from_start > rospy.Duration(0.0):
                     self.agent_tfs_arr.append(points.time_from_start)
-                    self.agent_pts_arr.append([points.pose.position.x , points.pose.position.y])
+                    self.agent_pts_arr.append([points.transform.translation.x , points.transform.translation.y])
             self.agent_trajs_arr.append([self.agent_tfs_arr, self.agent_pts_arr])
     
     def min_distance_calc(self , arr1 , arr2) : 
@@ -42,7 +42,7 @@ class cohan_attr:
         for i , points in enumerate(data.points):
             if points.time_from_start > rospy.Duration(0.0):
                 self.robot_tfs_arr.append(points.time_from_start.to_sec())
-                self.robot_pts_arr.append([points.pose.position.x , points.pose.position.y])
+                self.robot_pts_arr.append([points.transform.translation.x , points.transform.translation.y])
         min_distance = 100
         min_time = 100
         # if self.last_agent_data :
