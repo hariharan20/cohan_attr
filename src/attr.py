@@ -2,13 +2,32 @@
 import rospy
 from cohan_msgs.msg import Trajectory, AgentTrajectoryArray, TrackedAgents
 import numpy as np
+from nav_msgs.msg import OccupancyGrid
+import ros_numpy
+import matplotlib.pyplot as plt
+from sensor_msgs.msg import Image
 
+import cv2
 class cohan_attr:
     def __init__(self):
         self.last_agent_data = rospy.Time.now()
+        self.map =None
+        self.grid_half_size = 30
+        self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
+        rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
 
+    def obs_cb(self, data):
+        # print(np.array(data.data).shape )
+        print(data.info)
+        self.map = (np.array(data.data).reshape(data.info.height , data.info.width) > 0.3).astype(np.uint8)*255
+        print(np.unique(self.map))
+        self.resolution  = data.info.resolution
+        self.map_width = data.info.width
+        self.map_height = data.info.height
+        self.img_pub.publish(ros_numpy.msgify(Image , self.map , encoding='mono8'))
+        
     def agent_cb(self, data):
         self.agent_trajs_arr = []
         self.last_agent_data =  data.header.stamp 
@@ -35,7 +54,63 @@ class cohan_attr:
                 min_distance = np.min(distance)
         return min_index , min_distance
 
+    def nearest_obstacle(self , agent_arr):
+        agent_arr_np = np.array(agent_arr)
+        agent_arr_np_grid = agent_arr_np/self.resolution
+        min_distances = []
+        for pose in agent_arr_np_grid :
+            x , y  = pose # Correct it
+            search_grid = self.map[x-self.grid_half_size:x+self.grid_half_size , y-self.grid_half_size:y+self.grid_half_size]
+            distances = []
+            for i , point_x in enumerate(search_grid) :
+                y_points = search_grid[point_x]
+                for j, point_xy in enumerate(y_points):
+                    if point_xy :
+                        distances.append(np.linalg.norm([i-x , j-y]))
+            if len(distances) >0: 
+                min_distances.append(np.min(distances)*self.resolution)
+            else : 
+                min_distances.append(1000)
+        print(min_distances)
         
+
+    def nearest_obstacle_to_point(self , agent_coor):
+        agent_x = int((agent_coor[0]+ 20)/self.resolution) 
+        agent_y = int((agent_coor[1]+ 20)/self.resolution) 
+        print(agent_x , agent_y)
+        # print(self.map.shape)
+        # agent_arr_np = np.array(agent_arr)
+        # agent_arr_np_grid = agent_arr_np/self.resolution
+        # min_distances = []
+        # for pose in agent_arr_np_grid :
+        # x , y  = pose # Correct it
+
+        # print(agent_y-self.grid_half_size , agent_y+self.grid_half_size)
+        x_min_index = agent_x-self.grid_half_size if agent_x-self.grid_half_size > 0 else 0
+        x_max_index = agent_x+self.grid_half_size if agent_x+self.grid_half_size < self.map_width else self.map_width
+        y_min_index = agent_y-self.grid_half_size if agent_y-self.grid_half_size > 0 else 0
+        y_max_index = agent_y+self.grid_half_size if agent_y+self.grid_half_size < self.map_height else self.map_height
+        print(x_min_index , x_max_index , y_min_index , y_max_index)
+        search_grid = self.map[ y_min_index : y_max_index , x_min_index :x_max_index ]
+        self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] = self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] * (100/255)
+        self.img_pub.publish(ros_numpy.msgify(Image , self.map , encoding='mono8'))
+        self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] = self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] * (255/100)
+        # plt.show(search_grid)
+        print(search_grid.shape)
+        distances = []
+        for i , point_x in enumerate(search_grid) :
+            y_points = search_grid[i]
+            # print(y_points)
+            for j, point_xy in enumerate(y_points):
+                # print(point_xy)
+                if point_xy :
+                    distances.append(np.linalg.norm([i-agent_x , j-agent_y]))
+            # if len(distances) >0: 
+                # min_distances.append(np.min(distances)*self.resolution)
+            # else : 
+                # min_distances.append(1000)
+        return np.min(distances)*self.resolution
+
     def robot_cb(self , data):
         self.robot_pts_arr = []
         self.robot_tfs_arr = []
@@ -56,6 +131,7 @@ class cohan_attr:
                 if distance < min_distance:
                     min_distance = distance 
                     min_index = index
+                    
         else : 
             self.robot_pts_arr = []
             self.robot_tfs_arr = []
@@ -70,8 +146,9 @@ class cohan_attr:
                     min_index = index 
         # print(self.robot_tfs_arr[min_index])
         # print(min_distance)
-        text = "Hi Human, I will be closest to you in " + str(self.robot_tfs_arr[min_index]) + " seconds, within a distance of " + str(min_distance) + " meters"
-        print(text)  
+        print(self.nearest_obstacle_to_point(self.robot_pts_arr[min_index]))
+        # text = "Hi Human, I will be closest to you in " + str(self.robot_tfs_arr[min_index]) + " seconds, within a distance of " + str(min_distance) + " meters"
+        # print(text)  
 
 if __name__ == "__main__":
     rospy.init_node("cohan_attr")
