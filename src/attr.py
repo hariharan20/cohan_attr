@@ -5,6 +5,7 @@ import numpy as np
 from nav_msgs.msg import OccupancyGrid
 import ros_numpy
 import matplotlib.pyplot as plt
+import scipy
 from sensor_msgs.msg import Image
 
 import cv2
@@ -73,7 +74,41 @@ class cohan_attr:
                 min_distances.append(1000)
         print(min_distances)
         
+    def avg_slope(self, pts):
+        result = scipy.stats.linregress(pts[:,0] , pts[:,1])
 
+        return result.slope
+
+    def direction_of_crossing(self, robot_pts_arr , robot_index, human_index , human_pts_arr , human_static= False):
+        robot_pts_slice = robot_pts_arr[robot_index-10 : robot_index+10]
+        robot_pts_slice_np = np.array(robot_pts_slice)
+        robot_slope = self.avg_slope(robot_pts_slice)
+        robot_pts_wrt_human = robot_pts_slice_np - human_pts_arr[human_index]
+        if self.avg_slope(robot_pts_wrt_human) < 0 :
+            print('Crossing Behind or Left of the Human')
+            direction_tag = True
+        elif self.curvature(robot_pts_wrt_human) > 0 : 
+            print('Crossing Infront of Right of Human')
+            direction_tag = False
+        
+        if not human_static :
+            human_slope = self.avg_slope(human_pts_arr[human_index - 10 : human_index+10])
+        else : 
+            human_slope = self.human_angle # to be defined
+        
+        slope_difference = human_slope - robot_slope
+
+        if slope_difference < 45 :
+            if direction_tag :
+                text = "I will be following you crossing you by left"
+            else :
+                text = "I will be following you crossing you by right"
+        elif slope_difference > 45 :
+            if direction_tag :
+                text = "I will cross behind you"
+            else :
+                text = "I will cross infront of you"        
+        #### MORE CONDITIONS IF NEEDED 
     def nearest_obstacle_to_point(self , agent_coor):
         agent_x = int((agent_coor[0]+ 20)/self.resolution) 
         agent_y = int((agent_coor[1]+ 20)/self.resolution) 
