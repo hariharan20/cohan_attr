@@ -1,0 +1,4 @@
+<launch>
+<node name="mover" pkg="cohan_attr" type="move.py"/>
+<node name="attributer" pkg="cohan_attr" type="attr.py"/>
+</launch>
