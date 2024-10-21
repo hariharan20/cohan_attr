@@ -7,6 +7,15 @@ import ros_numpy
 import matplotlib.pyplot as plt
 import scipy
 from sensor_msgs.msg import Image
+import tf
+from geometry_msgs.msg import Quaternion
+from rosgraph_msgs.msg import Clock
+tf_listener = tf.TransformListener()
+
+def quat_to_euler(w , z):
+    # quaternion = Quaternion(0 , 0 ,z , w)
+    euler_angles = tf.transformations.euler_from_quaternion([0 , 0  , z , w])
+    return euler_angles[2]
 
 import cv2
 class cohan_attr:
@@ -18,6 +27,7 @@ class cohan_attr:
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
+        rospy.Subscriber('/clock' , Clock , self.clock_cb )
 
     def obs_cb(self, data):
         print(data.info)
@@ -27,7 +37,11 @@ class cohan_attr:
         self.map_width = data.info.width
         self.map_height = data.info.height
         self.img_pub.publish(ros_numpy.msgify(Image , self.map , encoding='mono8'))
-        
+    
+    def clock_cb(self , clock_data):
+        self.map_image = np.array([self.map , self.map, self.map])
+        self.img_pub.publish(ros_numpy.msgify(Image,  self.map_image , encoding="rgb8"))
+
     def agent_cb(self, data):
         self.agent_trajs_arr = []
         self.last_agent_data =  data.header.stamp 
@@ -79,25 +93,34 @@ class cohan_attr:
 
         return result.slope
 
-    def direction_of_crossing(self, robot_pts_arr , robot_index, human_index , human_pts_arr , human_static= False):
-        robot_pts_slice = robot_pts_arr[robot_index-10 : robot_index+10]
+    def direction_of_crossing_static(self , robot_pts_arr , robot_index , human_pose):
+        robot_pts_slice = robot_pts_arr[robot_index-10 : robot_index]
+        robot_pts_slice_np = np.array(robot_pts_slice)
+        robot_slope = self.avg_slope(robot_pts_slice)
+        robot_pts_wrt_human = robot_pts_slice_np - np.array(human_pose[0] , human_pose[1])
+        human_slope = human_pose[2]
+        slope_difference = robot_slope - human_slope 
+        
+        self.slope_conditions(slope_difference , robot_pts_wrt_human)
+
+
+    def direction_of_crossing(self, robot_pts_arr , robot_index, human_index,  human_pts_arr):
+        robot_pts_slice = robot_pts_arr[robot_index-10 : robot_index]
         robot_pts_slice_np = np.array(robot_pts_slice)
         robot_slope = self.avg_slope(robot_pts_slice)
         robot_pts_wrt_human = robot_pts_slice_np - human_pts_arr[human_index]
+        human_slope = self.avg_slope(human_pts_arr[human_index - 10 : human_index])        
+        slope_difference = human_slope - robot_slope
+        
+        self.slope_conditions(slope_difference , robot_pts_wrt_human)
+
+    def slope_conditions(self, slope_difference , robot_pts_wrt_human):
         if self.avg_slope(robot_pts_wrt_human) < 0 :
             print('Crossing Behind or Left of the Human')
             direction_tag = True
-        elif self.curvature(robot_pts_wrt_human) > 0 : 
+        elif self.avg_slope(robot_pts_wrt_human) > 0 : 
             print('Crossing Infront of Right of Human')
             direction_tag = False
-        
-        if not human_static :
-            human_slope = self.avg_slope(human_pts_arr[human_index - 10 : human_index+10])
-        else : 
-            human_slope = self.human_angle # to be defined
-        
-        slope_difference = human_slope - robot_slope
-
         if slope_difference < 45 :
             if direction_tag :
                 text = "I will be following you crossing you by left"
@@ -107,7 +130,8 @@ class cohan_attr:
             if direction_tag :
                 text = "I will cross behind you"
             else :
-                text = "I will cross infront of you"        
+                text = "I will cross infront of you"
+        print(text)        
         #### MORE CONDITIONS IF NEEDED 
     def nearest_obstacle_to_point(self , agent_coor):
         agent_x = int((agent_coor[0]+ 20)/self.resolution) 
@@ -120,9 +144,9 @@ class cohan_attr:
         print(x_min_index , x_max_index , y_min_index , y_max_index)
         search_grid = self.map[ y_min_index : y_max_index , x_min_index :x_max_index ]
         self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] = self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] * (100/255)
-        self.img_pub.publish(ros_numpy.msgify(Image , self.map , encoding='mono8'))
+        # self.img_pub.publish(ros_numpy.msgify(Image , self.map , encoding='mono8'))
         self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] = self.map[ y_min_index : y_max_index , x_min_index :x_max_index ] * (255/100)
-        print(search_grid.shape)
+        # print(search_grid.shape)
         distances = []
         for i , point_x in enumerate(search_grid) :
             y_points = search_grid[i]
@@ -154,7 +178,8 @@ class cohan_attr:
                     min_index = index
                     nearest_agent_id  = k
             agent_pose = [tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.position.x , tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.position.y ]
-                    
+            agent_angle = quat_to_euler(tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.orientation.z , tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.orientation.w)
+            self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle] )
         else : 
             self.robot_pts_arr = []
             self.robot_tfs_arr = []
@@ -170,8 +195,12 @@ class cohan_attr:
                     nearest_agent_id = z 
                     nearest_agent_traj_index = agent_index
             agent_pose= self.agent_trajs_arr[nearest_agent_id][1][nearest_agent_traj_index]
+            # static_human = False
+            self.direction_of_crossing(self.robot_pts_arr ,min_index , nearest_agent_traj_index, self.agent_trajs_arr[nearest_agent_id][1][nearest_agent_traj_index] )
+            # agent_angle = 
         # print(self.robot_tfs_arr[min_index])
         # print(min_distance)
+        # self.direction_of_crossing(self.robot_pts_arr , min_index,nearest_agent_traj_index , self.agent_trajs_arr[nearest_agent_id][1] , agent_pose , static_human  )
         print(self.nearest_obstacle_to_point(agent_pose))
         print(self.nearest_obstacle_to_point(self.robot_pts_arr[min_index]))
         # text = "Hi Human, I will be closest to you in " + str(self.robot_tfs_arr[min_index]) + " seconds, within a distance of " + str(min_distance) + " meters"
