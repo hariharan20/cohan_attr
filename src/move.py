@@ -15,7 +15,7 @@ class sim_env:
         self.human_state_msg.reference_frame = 'map'
         model_stats = rospy.wait_for_message('/gazebo/model_states' , ModelStates , timeout=4.0 )
         self.human_state_msg.pose= model_stats.pose[3] # States of human2 in the scene
-        self.msg.linear.x = 0.5
+        self.msg.linear.x = 0.2
         self.pub.publish(self.msg)
         sub=rospy.Subscriber('move_base/result' , MoveBaseActionResult , self.end_cb)
 
@@ -28,7 +28,7 @@ class sim_env:
             reset_world_service()
             self.state_pub.publish(self.human_state_msg)
             rospy.sleep(1.0)
-            self.msg.linear.x = 0.5
+            self.msg.linear.x = 0.2
             self.pub.publish(self.msg)
         except rospy.ServiceException as e :
             rospy.logerr(f"Service call failed: {e}")

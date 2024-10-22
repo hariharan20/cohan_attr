@@ -38,6 +38,9 @@
 
   <!-- Rviz -->
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find cohan_navigation)/rviz/cohan_nav_stage.rviz" />
+  <node name="mover" pkg="cohan_attr" type="move.py"/>
+
+
 </launch>
 
     <!-- <arg name="robot_initial_pose" value="-x 1.2 -y 3.6 -z 0.0"/> -->
