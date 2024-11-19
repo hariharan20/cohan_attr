@@ -3,7 +3,7 @@ import rospy
 from cohan_msgs.msg import Trajectory, AgentTrajectoryArray, TrackedAgents
 import numpy as np
 from nav_msgs.msg import OccupancyGrid
-import ros_numpy
+# import ros_numpy
 import matplotlib.pyplot as plt
 import scipy
 from sensor_msgs.msg import Image
@@ -26,6 +26,7 @@ class cohan_attr:
     def __init__(self):
         self.last_agent_data = rospy.Time.now()
         self.map =None
+        self.trigger_time = rospy.get_param("robot_trigger_time" , 4.0)
         self.grid_half_size = 30
         self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
         self.angle_pub = rospy.Publisher('/angle', Float64 , queue_size=10, latch=True)
@@ -130,8 +131,12 @@ class cohan_attr:
                 self.angle_pub.publish(Float64(rad_to_deg(slope_difference)))
                 text = self.slope_conditions(rad_to_deg(slope_difference) , robot_pts_wrt_human)
                 full_text = str(round(time_to_nearest_pose , 2)) + " secs | " + str(round(min_distance , 2)) + "m | " + text
-                if self.clock_flag:
+                # if self.clock_flag:
+                    # print(full_text)
+                # already_published = False
+                if round(time_to_nearest_pose , 0) == self.trigger_time : 
                     print(full_text)
+                    rospy.sleep(1.0)
                     # self.clock_flag = False
 
     # def direction_of_crossing(self, robot_pts_arr , robot_index, human_index,  human_pts_arr):
@@ -234,7 +239,7 @@ class cohan_attr:
             agent_pose = [tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.position.x , tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.position.y ]
             agent_angle = quat_to_euler(tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.orientation.z , tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.orientation.w)
             # print("Static Human Detected" , agent_pose, agent_angle)
-            print("Static Human Detected")
+            # print("Static Human Detected")
             # self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle] )
 
         # else : 
