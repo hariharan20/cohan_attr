@@ -12,6 +12,8 @@ from geometry_msgs.msg import Quaternion
 from rosgraph_msgs.msg import Clock
 import math
 from std_msgs.msg import Float64
+import json
+import rospkg
 # tf_listener = tf.TransformListener()
 
 def quat_to_euler(w , z):
@@ -27,10 +29,18 @@ class cohan_attr:
         self.last_agent_data = rospy.Time.now()
         self.map =None
         self.trigger_time = rospy.get_param("robot_trigger_time" , 4.0)
+        self.trigger_distance_to_door = rospy.get_param("robot_convo_trigger_distance" , 2.0)
         self.grid_half_size = 30
+        ros_pack = rospkg.RosPack()
         self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
         self.angle_pub = rospy.Publisher('/angle', Float64 , queue_size=10, latch=True)
         self.clock_flag = False
+        self.door_centers  =[]
+        self.start_convo = False
+        locations = json.load(open(ros_pack.get_path('cohan_attr')  + '/config/locations.json'))
+        for location in locations['map']: 
+            if ('enter' in location['name']) or ('exit' in location['name']):
+                self.door_centers.append(location['pose']['center'])
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
 
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
@@ -134,9 +144,11 @@ class cohan_attr:
                 # if self.clock_flag:
                     # print(full_text)
                 # already_published = False
-                if round(time_to_nearest_pose , 0) == self.trigger_time : 
+                # if round(time_to_nearest_pose , 0) == self.trigger_time : 
+                if self.start_convo:
                     print(full_text)
-                    rospy.sleep(1.0)
+                    # rospy.sleep(1.0)
+                    self.start_convo=False
                     # self.clock_flag = False
 
     # def direction_of_crossing(self, robot_pts_arr , robot_index, human_index,  human_pts_arr):
@@ -148,7 +160,18 @@ class cohan_attr:
         # slope_difference = human_slope - robot_slope
         # 
         # self.slope_conditions(slope_difference , robot_pts_wrt_human)
-
+    # def conversation_trigger(self , robot_point , ):
+    def distance_to_nearest_door(self, robot_point):
+        # print()
+        # print(self.door_centers)
+        dis_to_door_list = np.linalg.norm(np.array(self.door_centers) - np.array(robot_point) , axis=1)
+        print(dis_to_door_list)
+        if np.min(dis_to_door_list) < self.trigger_distance_to_door:
+            rospy.set_param('start_convo',  True)
+            print('Convo Started !!')
+            self.start_convo = True
+            rospy.sleep(0.5)
+            rospy.set_param('start_convo' , False)
     def slope_conditions(self, slope_difference , robot_pts_wrt_human):
         # condition_attr_1 = self.avg_slope(robot_pts_wrt_human) 
         # print(slope_difference)
@@ -259,8 +282,9 @@ class cohan_attr:
                     nearest_agent_traj_index = agent_index
             agent_pose= self.agent_trajs_arr[nearest_agent_id][1][nearest_agent_traj_index]
             agent_angle= self.agent_trajs_arr[nearest_agent_id][2][nearest_agent_traj_index]
+        # print(self.robot_pts_arr[min_index])
         self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle]  , self.robot_tfs_arr[min_index] , min_distance)
-
+        self.distance_to_nearest_door(self.robot_pts_arr[min_index])
             # static_human = False
             # self.direction_of_crossing(self.robot_pts_arr ,min_index , nearest_agent_traj_index, self.agent_trajs_arr[nearest_agent_id][1][nearest_agent_traj_index] )
             # agent_angle = 
