@@ -36,6 +36,7 @@ class cohan_attr:
         self.angle_pub = rospy.Publisher('/angle', Float64 , queue_size=10, latch=True)
         self.clock_flag = False
         self.door_centers  =[]
+        rospy.set_param('start_convo' , False)
         self.start_convo = False
         locations = json.load(open(ros_pack.get_path('cohan_attr')  + '/config/locations.json'))
         for location in locations['map']: 
@@ -144,11 +145,11 @@ class cohan_attr:
                 # if self.clock_flag:
                     # print(full_text)
                 # already_published = False
-                # if round(time_to_nearest_pose , 0) == self.trigger_time : 
-                if self.start_convo:
+                if round(time_to_nearest_pose , 0) == self.trigger_time : 
+                # if self.start_convo:
                     print(full_text)
                     # rospy.sleep(1.0)
-                    self.start_convo=False
+                    # self.start_convo=False
                     # self.clock_flag = False
 
     # def direction_of_crossing(self, robot_pts_arr , robot_index, human_index,  human_pts_arr):
@@ -166,12 +167,13 @@ class cohan_attr:
         # print(self.door_centers)
         dis_to_door_list = np.linalg.norm(np.array(self.door_centers) - np.array(robot_point) , axis=1)
         print(dis_to_door_list)
-        if np.min(dis_to_door_list) < self.trigger_distance_to_door:
-            rospy.set_param('start_convo',  True)
-            print('Convo Started !!')
-            self.start_convo = True
-            rospy.sleep(0.5)
-            rospy.set_param('start_convo' , False)
+        if np.min(dis_to_door_list) < self.trigger_distance_to_door :
+            if not self.start_convo : 
+                rospy.set_param('start_convo',  True)
+                print('Convo Started !!')
+                self.start_convo = True
+                # rospy.sleep(0.5)
+            # rospy.set_param('start_convo' , False)
     def slope_conditions(self, slope_difference , robot_pts_wrt_human):
         # condition_attr_1 = self.avg_slope(robot_pts_wrt_human) 
         # print(slope_difference)
