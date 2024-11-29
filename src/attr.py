@@ -12,6 +12,7 @@ import math
 from std_msgs.msg import Float64
 import json
 import rospkg
+import time 
 
 def quat_to_euler(w , z):
     euler_angles = tf.transformations.euler_from_quaternion([0 , 0  , z , w])
@@ -33,7 +34,7 @@ class cohan_attr:
         self.clock_flag = False
         self.door_centers  =[]
         rospy.set_param('start_convo' , False)
-        self.start_convo = False
+        # self.start_convo = False
         locations = json.load(open(ros_pack.get_path('cohan_attr')  + '/config/locations.json'))
         for location in locations['map']: 
             if ('enter' in location['name']) or ('exit' in location['name']):
@@ -108,13 +109,15 @@ class cohan_attr:
                 if round(time_to_nearest_pose , 0) == self.trigger_time : 
                     nothing = 0
 
-    def distance_to_nearest_door(self, robot_point):
+    def distance_to_nearest_door(self, robot_point , min_distance , agent_pose , robot_current_pose):
         dis_to_door_list = np.linalg.norm(np.array(self.door_centers) - np.array(robot_point) , axis=1)
-        if np.min(dis_to_door_list) < self.trigger_distance_to_door :
-            if not self.start_convo : 
+        dis_to_human = np.linalg.norm( np.array(agent_pose)- np.array(robot_current_pose))
+        if (np.min(dis_to_door_list) < self.trigger_distance_to_door ) and (dis_to_human < 5.0) and min_distance < 2.0:
+            if not rospy.get_param('start_convo' , False) : 
                 rospy.set_param('start_convo',  True)
                 print('Convo Started !!')
-                self.start_convo = True
+                time.sleep(20)
+                # self.start_convo = True
 
     def slope_conditions(self, slope_difference , robot_pts_wrt_human):
         if slope_difference < 90 and slope_difference > 45 :
@@ -158,6 +161,8 @@ class cohan_attr:
         else:    
             min_distance = 10000
             for z , agent_traj in enumerate(self.agent_trajs_arr):
+                if len(agent_traj[1]) == 0 :
+                    continue
                 index , distance , agent_index = self.min_distance_calc(self.robot_pts_arr , agent_traj[1])
                 if distance < min_distance :
                     min_distance = distance
@@ -171,7 +176,7 @@ class cohan_attr:
                 sync_error = True
         if not sync_error :
             self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle]  , self.robot_tfs_arr[min_index] , min_distance)
-            self.distance_to_nearest_door(self.robot_pts_arr[min_index])
+            self.distance_to_nearest_door(self.robot_pts_arr[min_index] , min_distance , agent_pose , self.robot_pts_arr[0])
 
 
 if __name__ == "__main__":
