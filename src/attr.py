@@ -13,7 +13,7 @@ from std_msgs.msg import Float64
 import json
 import rospkg
 import time 
-
+from ultralytics import YOLO
 def quat_to_euler(w , z):
     euler_angles = tf.transformations.euler_from_quaternion([0 , 0  , z , w])
     return euler_angles[2]
@@ -39,11 +39,26 @@ class cohan_attr:
         for location in locations['map']: 
             if ('enter' in location['name']) or ('exit' in location['name']):
                 self.door_centers.append(location['pose']['center'])
+        yolo_model = 'yolov8s.pt'
+        self.yolo = YOLO(yolo_model)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
-
+        rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
         rospy.Subscriber('/clock' , Clock , self.clock_cb )
+
+    def image_cb(self , data):
+        img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
+        if rospy.get_param('check_for_humans' ,False):    
+            result =  self.yolo(img , show= False)
+            classes = result[0].boxes.cls.detach().cpu().numpy()
+            # print(result[0].boxes.cls.detach().cpu().numpy())
+            human_detected = False
+            if 0 in classes : 
+                human_detected = True
+            # print(len(classes))
+            # print(human_detected)
+            rospy.set_param('human_detected' , human_detected)
 
     def obs_cb(self, data):
         print(data.info)
