@@ -14,6 +14,10 @@ import json
 import rospkg
 import time 
 from ultralytics import YOLO
+from cv_bridge import CvBridge
+bridge = CvBridge()
+
+# import ros_numpy 
 def quat_to_euler(w , z):
     euler_angles = tf.transformations.euler_from_quaternion([0 , 0  , z , w])
     return euler_angles[2]
@@ -40,7 +44,9 @@ class cohan_attr:
             if ('enter' in location['name']) or ('exit' in location['name']):
                 self.door_centers.append(location['pose']['center'])
         yolo_model = 'yolov8s.pt'
+        # yolo_model = 'yolov8n.pt'
         self.yolo = YOLO(yolo_model)
+        self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=10, latch=True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
@@ -51,13 +57,31 @@ class cohan_attr:
         img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
         if rospy.get_param('check_for_humans' ,False):    
             result =  self.yolo(img , show= False)
-            classes = result[0].boxes.cls.detach().cpu().numpy()
-            # print(result[0].boxes.cls.detach().cpu().numpy())
-            human_detected = False
-            if 0 in classes : 
+            print(data.height, data.width)
+            # Extract bounding boxes, classes, names, and confidences
+            boxes = result[0].boxes.xyxy.tolist()
+            classes = result[0].boxes.cls.tolist()
+            names = result[0].names
+            confidences = result[0].boxes.conf.tolist()
+            human_bbs = []
+            human_confs = []
+            # Iterate through the results
+            for box, cls, conf in zip(boxes, classes, confidences):
+                if cls == 0 : 
+                    human_bbs.append(box)
+                    human_confs.append(conf)
+            if len(human_confs) > 0 :
+                confi_id = np.argmin(human_confs)
+                # print( human_bbs[confi_id])
+                [x_min , y_min , x_max , y_max] = human_bbs[confi_id]
+                # print(img.shape)
+                # print(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max),  : ].shape)
+                img_msg = bridge.cv2_to_imgmsg(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)], encoding="rgb8")
+                self.img_pub.publish(img_msg)
+                print('published image')
                 human_detected = True
-            # print(len(classes))
-            # print(human_detected)
+            else :
+                human_detected = False
             rospy.set_param('human_detected' , human_detected)
 
     def obs_cb(self, data):
