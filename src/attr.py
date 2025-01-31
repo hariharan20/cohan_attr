@@ -46,6 +46,7 @@ class cohan_attr:
         yolo_model = 'yolov8s.pt'
         # yolo_model = 'yolov8n.pt'
         self.yolo = YOLO(yolo_model)
+        rospy.set_param('check_for_humans' ,False)
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=10, latch=True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
@@ -56,8 +57,8 @@ class cohan_attr:
     def image_cb(self , data):
         img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
         if rospy.get_param('check_for_humans' ,False):    
-            result =  self.yolo(img , show= False)
-            print(data.height, data.width)
+            result =  self.yolo(img , show= False , verbose=False)
+            # print(data.height, data.width)
             # Extract bounding boxes, classes, names, and confidences
             boxes = result[0].boxes.xyxy.tolist()
             classes = result[0].boxes.cls.tolist()
@@ -130,6 +131,7 @@ class cohan_attr:
         pts = np.array(pts)
         if not len(pts.shape) == 2:
             return None 
+        # print(pts[: , 1].shape)
         result = scipy.stats.linregress(pts[:,0] , pts[:,1])
         return result.slope
 
@@ -148,15 +150,18 @@ class cohan_attr:
                 if round(time_to_nearest_pose , 0) == self.trigger_time : 
                     nothing = 0
 
-    def distance_to_nearest_door(self, robot_point , min_distance , agent_pose , robot_current_pose):
+    def distance_to_nearest_door(self, robot_point , min_distance , agent_pose , robot_current_pose , robot_pts_arr):
         dis_to_door_list = np.linalg.norm(np.array(self.door_centers) - np.array(robot_point) , axis=1)
         dis_to_human = np.linalg.norm( np.array(agent_pose)- np.array(robot_current_pose))
-        if (np.min(dis_to_door_list) < self.trigger_distance_to_door ) and (dis_to_human < 5.0) and min_distance < 2.0:
-            if not rospy.get_param('start_convo' , False) : 
-                rospy.set_param('start_convo',  True)
-                print('Convo Started !!')
-                time.sleep(20)
-                # self.start_convo = True
+        if (np.min(dis_to_door_list) < self.trigger_distance_to_door ) :  
+            closest_door_centre = self.door_centers[np.argmin(dis_to_door_list)]
+            closest_door_to_traj_dist = np.linalg.norm(np.array(robot_pts_arr) - np.array(closest_door_centre) , axis=1)
+            if (np.min(closest_door_to_traj_dist) < 0.2 ) and (dis_to_human < 5.0) and min_distance < 2.0:
+                if not rospy.get_param('start_convo' , False) and rospy.get_param('task_started' , False): 
+                    rospy.set_param('start_convo',  True)
+                    print('Convo Started !!')
+                    time.sleep(20)
+                    # self.start_convo = True
 
     def slope_conditions(self, slope_difference , robot_pts_wrt_human):
         if slope_difference < 90 and slope_difference > 45 :
@@ -215,7 +220,7 @@ class cohan_attr:
                 sync_error = True
         if not sync_error :
             self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle]  , self.robot_tfs_arr[min_index] , min_distance)
-            self.distance_to_nearest_door(self.robot_pts_arr[min_index] , min_distance , agent_pose , self.robot_pts_arr[0])
+            self.distance_to_nearest_door(self.robot_pts_arr[min_index] , min_distance , agent_pose , self.robot_pts_arr[0] , self.robot_pts_arr)
 
 
 if __name__ == "__main__":
