@@ -13,6 +13,8 @@ from std_msgs.msg import Float64
 import json
 import rospkg
 import time 
+from cohan_attr.msg import attr
+
 
 def quat_to_euler(w , z):
     euler_angles = tf.transformations.euler_from_quaternion([0 , 0  , z , w])
@@ -31,6 +33,7 @@ class cohan_attr:
         ros_pack = rospkg.RosPack()
         self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
         self.angle_pub = rospy.Publisher('/angle', Float64 , queue_size=10, latch=True)
+        self.attr_pub = rospy.Publisher('cohan_attr/attr' , attr , queue_size= 1 , latch=True)
         self.clock_flag = False
         self.door_centers  =[]
         rospy.set_param('start_convo' , False)

@@ -1,0 +1,3 @@
+float64 distance_while_crossing
+string direction_of_crossing
+float64 time_to_cross
