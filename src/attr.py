@@ -58,6 +58,7 @@ class cohan_attr:
         img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
         if rospy.get_param('check_for_humans' ,False):    
             result =  self.yolo(img , show= False , verbose=False)
+            # depth_image = rospy.wait_for_message('/')
             # print(data.height, data.width)
             # Extract bounding boxes, classes, names, and confidences
             boxes = result[0].boxes.xyxy.tolist()
@@ -77,11 +78,13 @@ class cohan_attr:
                 [x_min , y_min , x_max , y_max] = human_bbs[confi_id]
                 # print(img.shape)
                 # print(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max),  : ].shape)
-                img_msg = bridge.cv2_to_imgmsg(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)], encoding="rgb8")
-                self.img_pub.publish(img_msg)
-                print('published image')
-                human_detected = True
-                rospy.set_param('human_detected' , human_detected)
+                # print(x_max - x_min , y_max - y_min )
+                if (x_max - x_min) > 250 and (y_max - y_min) > 600: 
+                    img_msg = bridge.cv2_to_imgmsg(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)], encoding="rgb8")
+                    self.img_pub.publish(img_msg)
+                    print('published image')
+                    human_detected = True
+                    rospy.set_param('human_detected' , human_detected)
 
 
     def obs_cb(self, data):
