@@ -81,9 +81,8 @@ class cohan_attr:
                 self.img_pub.publish(img_msg)
                 print('published image')
                 human_detected = True
-            else :
-                human_detected = False
-            rospy.set_param('human_detected' , human_detected)
+                rospy.set_param('human_detected' , human_detected)
+
 
     def obs_cb(self, data):
         print(data.info)
