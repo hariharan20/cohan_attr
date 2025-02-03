@@ -33,6 +33,7 @@ class cohan_attr:
         ros_pack = rospkg.RosPack()
         self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
         self.angle_pub = rospy.Publisher('/angle', Float64 , queue_size=10, latch=True)
+        self.attr_msg = attr()
         self.attr_pub = rospy.Publisher('cohan_attr/attr' , attr , queue_size= 1 , latch=True)
         self.clock_flag = False
         self.door_centers  =[]
@@ -108,6 +109,10 @@ class cohan_attr:
                 slope_difference = math.atan(robot_slope) - human_slope
                 self.angle_pub.publish(Float64(rad_to_deg(slope_difference)))
                 text = self.slope_conditions(rad_to_deg(slope_difference) , robot_pts_wrt_human)
+                self.attr_msg.distance_while_crossing = min_distance
+                self.attr_msg.direction_of_crossing = text
+                self.attr_msg.time_to_cross = time_to_nearest_pose
+                self.attr_pub.publish(self.attr_msg)
                 full_text = str(round(time_to_nearest_pose , 2)) + " secs | " + str(round(min_distance , 2)) + "m | " + text
                 if round(time_to_nearest_pose , 0) == self.trigger_time : 
                     nothing = 0
@@ -115,7 +120,7 @@ class cohan_attr:
     def distance_to_nearest_door(self, robot_point , min_distance , agent_pose , robot_current_pose):
         dis_to_door_list = np.linalg.norm(np.array(self.door_centers) - np.array(robot_point) , axis=1)
         dis_to_human = np.linalg.norm( np.array(agent_pose)- np.array(robot_current_pose))
-        if (np.min(dis_to_door_list) < self.trigger_distance_to_door ) and (dis_to_human < 5.0) and min_distance < 2.0:
+        if (np.min(dis_to_door_list) < self.trigger_distance_to_door ) or (dis_to_human < 5.0) or min_distance < 2.0:
             if not rospy.get_param('start_convo' , False) : 
                 rospy.set_param('start_convo',  True)
                 print('Convo Started !!')
@@ -179,6 +184,7 @@ class cohan_attr:
                 sync_error = True
         if not sync_error :
             self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle]  , self.robot_tfs_arr[min_index] , min_distance)
+            time.sleep(0.5)
             self.distance_to_nearest_door(self.robot_pts_arr[min_index] , min_distance , agent_pose , self.robot_pts_arr[0])
 
 
