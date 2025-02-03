@@ -14,6 +14,10 @@ import json
 import rospkg
 import time 
 from ultralytics import YOLO
+# from mediapipe import *
+import mediapipe as mp
+
+fd = mp.solutions.face_detection
 from cv_bridge import CvBridge
 bridge = CvBridge()
 
@@ -47,6 +51,8 @@ class cohan_attr:
         # yolo_model = 'yolov8n.pt'
         self.yolo = YOLO(yolo_model)
         rospy.set_param('check_for_humans' ,False)
+        self.mp_face_detection = fd
+
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=10, latch=True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
@@ -54,9 +60,17 @@ class cohan_attr:
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
         rospy.Subscriber('/clock' , Clock , self.clock_cb )
 
+    def is_face_visible(self  , input_image) :
+        with self.mp_face_detection.FaceDetection(model_selection=1 , min_detection_confidence=0.5 ) as face_detection : 
+            results = face_detection.process(np.ascontiguousarray(input_image))
+        face_detected = False
+        if results.detections : 
+            face_detected = True
+        return face_detected 
     def image_cb(self , data):
         img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
-        if rospy.get_param('check_for_humans' ,False):    
+        if rospy.get_param('check_for_humans' ,False):
+            # if True : 
             result =  self.yolo(img , show= False , verbose=False)
             # depth_image = rospy.wait_for_message('/')
             # print(data.height, data.width)
@@ -78,13 +92,17 @@ class cohan_attr:
                 [x_min , y_min , x_max , y_max] = human_bbs[confi_id]
                 # print(img.shape)
                 # print(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max),  : ].shape)
-                # print(x_max - x_min , y_max - y_min )
+                print(x_max - x_min , y_max - y_min )
+                cropped_image = img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)]
+                rospy.logerr('CROPPED IMAGE')
                 if (x_max - x_min) > 250 and (y_max - y_min) > 600: 
-                    img_msg = bridge.cv2_to_imgmsg(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)], encoding="rgb8")
-                    self.img_pub.publish(img_msg)
-                    print('published image')
-                    human_detected = True
-                    rospy.set_param('human_detected' , human_detected)
+                    if self.is_face_visible(cropped_image):
+                        rospy.logerr('FACE VISIBLE')
+                        img_msg = bridge.cv2_to_imgmsg(cropped_image ,  encoding="rgb8")
+                        self.img_pub.publish(img_msg)
+                        print('published image')
+                        human_detected = True
+                        rospy.set_param('human_detected' , human_detected)
 
 
     def obs_cb(self, data):
