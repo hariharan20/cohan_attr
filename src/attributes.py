@@ -37,7 +37,7 @@ class cohan_attr:
         self.trigger_distance_to_door = rospy.get_param("robot_convo_trigger_distance" , 2.0)
         self.grid_half_size = 30
         ros_pack = rospkg.RosPack()
-        self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
+        # self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
         self.angle_pub = rospy.Publisher('/angle', Float64 , queue_size=10, latch=True)
         self.clock_flag = False
         self.door_centers  =[]
@@ -50,15 +50,18 @@ class cohan_attr:
         yolo_model = 'yolov8s.pt'
         # yolo_model = 'yolov8n.pt'
         self.yolo = YOLO(yolo_model)
-        rospy.set_param('check_for_humans' ,False)
+        # rospy.set_param('check_for_humans' ,False)
         self.mp_face_detection = fd
-
-        self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=10, latch=True)
+        self.last_image_sent = time.time()
+        self.publish_image = True
+        self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
-        rospy.Subscriber('/clock' , Clock , self.clock_cb )
+        rospy.Subscriber('/clock' , Clock , self.flag_checker)
+        # rospy.Subscriber('/clock' , Clock , self.clock_cb )
+
 
     def is_face_visible(self  , input_image) :
         with self.mp_face_detection.FaceDetection(model_selection=1 , min_detection_confidence=0.5 ) as face_detection : 
@@ -67,42 +70,50 @@ class cohan_attr:
         if results.detections : 
             face_detected = True
         return face_detected 
+    
+    def flag_checker(self , _ ):
+        if (time.time() - self.last_image_sent> 5.0) or rospy.get_param('check_for_humans' , False) : 
+            self.publish_image = True
+            # print('PUBLISH IMAGE SET TO TRUE')
+        else : 
+            self.publish_image = False 
+
     def image_cb(self , data):
         img = np.frombuffer(data.data, dtype=np.uint8).reshape(data.height, data.width, -1)
-        if rospy.get_param('check_for_humans' ,False):
+        # if rospy.get_param('check_for_humans' ,False):
             # if True : 
-            result =  self.yolo(img , show= False , verbose=False)
-            # depth_image = rospy.wait_for_message('/')
-            # print(data.height, data.width)
-            # Extract bounding boxes, classes, names, and confidences
-            boxes = result[0].boxes.xyxy.tolist()
-            classes = result[0].boxes.cls.tolist()
-            names = result[0].names
-            confidences = result[0].boxes.conf.tolist()
-            human_bbs = []
-            human_confs = []
-            # Iterate through the results
-            for box, cls, conf in zip(boxes, classes, confidences):
-                if cls == 0 : 
-                    human_bbs.append(box)
-                    human_confs.append(conf)
-            if len(human_confs) > 0 :
-                confi_id = np.argmin(human_confs)
-                # print( human_bbs[confi_id])
-                [x_min , y_min , x_max , y_max] = human_bbs[confi_id]
-                # print(img.shape)
-                # print(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max),  : ].shape)
-                print(x_max - x_min , y_max - y_min )
-                cropped_image = img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)]
-                rospy.logerr('CROPPED IMAGE')
-                if (x_max - x_min) > 250 and (y_max - y_min) > 600: 
+        result =  self.yolo(img , show= False , verbose=False)
+        boxes = result[0].boxes.xyxy.tolist()
+        classes = result[0].boxes.cls.tolist()
+        names = result[0].names
+        confidences = result[0].boxes.conf.tolist()
+        human_bbs = []
+        human_confs = []
+        # Iterate through the results
+        for box, cls, conf in zip(boxes, classes, confidences):
+            if cls == 0 : 
+                human_bbs.append(box)
+                human_confs.append(conf)
+        if len(human_confs) > 0 :
+            confi_id = np.argmin(human_confs)
+            # print( human_bbs[confi_id])
+            [x_min , y_min , x_max , y_max] = human_bbs[confi_id]
+            # print(img.shape)
+            # print(img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max),  : ].shape)
+            # print(x_max - x_min , y_max - y_min )
+            cropped_image = img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)]
+            # rospy.logerr('CROPPED IMAGE')
+            if (x_max - x_min) > 250 and (y_max - y_min) > 600: 
+                if self.publish_image : 
                     if self.is_face_visible(cropped_image):
                         rospy.logerr('FACE VISIBLE')
                         img_msg = bridge.cv2_to_imgmsg(cropped_image ,  encoding="rgb8")
                         self.img_pub.publish(img_msg)
+                        self.publish_image = False
                         print('published image')
-                        human_detected = True
-                        rospy.set_param('human_detected' , human_detected)
+                        rospy.set_param('human_detected' , True)
+                        self.last_image_sent = time.time()
+                        rospy.set_param('check_for_humans' , False)
 
 
     def obs_cb(self, data):
@@ -177,7 +188,7 @@ class cohan_attr:
             closest_door_centre = self.door_centers[np.argmin(dis_to_door_list)]
             closest_door_to_traj_dist = np.linalg.norm(np.array(robot_pts_arr) - np.array(closest_door_centre) , axis=1)
             if (np.min(closest_door_to_traj_dist) < 0.2 ) and (dis_to_human < 5.0) and min_distance < 2.0:
-                if not rospy.get_param('start_convo' , False) and rospy.get_param('task_started' , False): 
+                if not rospy.get_param('start_convo' , False): 
                     rospy.set_param('start_convo',  True)
                     print('Convo Started !!')
                     time.sleep(20)
