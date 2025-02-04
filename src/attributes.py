@@ -58,6 +58,7 @@ class cohan_attr:
         self.mp_face_detection = fd
         self.last_image_sent = time.time()
         self.publish_image = True
+        self.last_start_convo = time.time()
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
@@ -197,10 +198,11 @@ class cohan_attr:
             closest_door_centre = self.door_centers[np.argmin(dis_to_door_list)]
             closest_door_to_traj_dist = np.linalg.norm(np.array(robot_pts_arr) - np.array(closest_door_centre) , axis=1)
         if (np.min(closest_door_to_traj_dist) < 0.2 ) or ((dis_to_human < 5.0) and min_distance < 2.0):
-            if not rospy.get_param('start_convo' , False): 
+            if (not rospy.get_param('start_convo' , False)) and (time.time() - self.last_start_convo > 10.0): 
                 rospy.set_param('start_convo',  True)
+                self.last_start_convo = time.time()
                 print('Convo Started !!')
-                time.sleep(20)
+                # time.sleep(20)
                 # self.start_convo = True
 
     def slope_conditions(self, slope_difference , robot_pts_wrt_human):
