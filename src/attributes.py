@@ -17,6 +17,7 @@ from ultralytics import YOLO
 # from mediapipe import *
 import mediapipe as mp
 from cohan_attr.msg import attr
+from std_msgs.msg import String
 
 fd = mp.solutions.face_detection
 from cv_bridge import CvBridge
@@ -60,6 +61,7 @@ class cohan_attr:
         self.publish_image = True
         self.last_start_convo = time.time()
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=True)
+        self.alert_pub = rospy.Publisher('/cohan_attr/alert' , String , queue_size=1)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
@@ -114,6 +116,7 @@ class cohan_attr:
                         rospy.logerr('FACE VISIBLE')
                         img_msg = bridge.cv2_to_imgmsg(cropped_image ,  encoding="rgb8")
                         self.img_pub.publish(img_msg)
+                        self.alert_pub.publish(String("{data: '{\"bottleneck\": true, \"dialogue\": \"I will pass closely on your left\"}'}"))
                         self.publish_image = False
                         print('published image')
                         rospy.set_param('human_detected' , True)
