@@ -17,7 +17,11 @@ from ultralytics import YOLO
 # from mediapipe import *
 import mediapipe as mp
 from cohan_attr.msg import attr
-from std_msgs.msg import String
+from cohan_msgs.msg import TrackedAgents , AgentPathArray
+from geometry_msgs.msg import Pose  , PoseArray , PoseStamped
+import time
+LEN_OF_HUMAN_TRAJ = 10
+
 
 fd = mp.solutions.face_detection
 from cv_bridge import CvBridge
@@ -61,13 +65,77 @@ class cohan_attr:
         self.publish_image = True
         self.last_start_convo = time.time()
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=True)
-        self.alert_pub = rospy.Publisher('/cohan_attr/alert' , String , queue_size=1)
+        rospy.set_param('reset_human_traj_record' , True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
+        rospy.Subscriber('tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
         rospy.Subscriber('/clock' , Clock , self.flag_checker)
+
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
+
+    
+    def path_extractor(self, plan):
+        x = []
+        y = []
+        # print(len(plan.paths))
+        for pose in plan.paths[0].path.poses : 
+            x.append(pose.pose.position.x)
+            y.append(pose.pose.position.y)
+        return x , y
+    
+    def tracked_agents_cb(self , data):
+
+        # self.pose_msg_array = []
+        if rospy.get_param('reset_human_traj_record' , False )  :
+            self.pose_msg_array = []
+            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
+            self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.human_global_plan[0] , self.human_global_plan[1] , 3 , full=True)
+            print(np.sqrt(residuals)/len(self.human_global_plan[0]))
+            time.sleep(1)
+            self.human_local_plan = self.path_extractor(rospy.wait_for_message('move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
+            self.initial_time = time.time()
+            self.local_poly_model  , residuals , _ ,  _ , _= np.polyfit(self.human_local_plan[0] , self.human_local_plan[1] , 3 , full=True)
+            print(np.sqrt(residuals)/len(self.human_local_plan[0]))
+            
+            rospy.set_param('reset_human_traj_record' , False)
+        if len(self.pose_msg_array) == LEN_OF_HUMAN_TRAJ :
+            self.pose_msg_array.pop(0)
+        self.pose_msg.header.stamp = rospy.Time.now()
+        self.pose_msg.header.frame_id = 'map'
+        self.pose_msg.pose.position.x = data.agents[1].segments[0].pose.pose.position.x
+        self.pose_msg.pose.position.y = data.agents[1].segments[0].pose.pose.position.y
+        self.pose_msg.pose.orientation.z = data.agents[1].segments[0].pose.pose.orientation.z
+        self.pose_msg.pose.orientation.w = data.agents[1].segments[0].pose.pose.orientation.w
+        self.pub.publish(self.pose_msg)
+        self.pose_msg_array.append([data.agents[1].segments[0].pose.pose.position.x , data.agents[1].segments[0].pose.pose.position.y])
+
+
+    def check_the_plans(self , _):
+        try : 
+            if len(np.array(self.pose_msg_array).shape) == 2: 
+                recorded_path = np.array(self.pose_msg_array)
+                y_global_pred = np.polyval(self.global_poly_model , recorded_path[:,0])
+                y_local_pred = np.polyval(self.local_poly_model , recorded_path[:,0])
+                error_global = np.mean(np.abs(y_global_pred - recorded_path[:,1]))
+                error_local = np.mean(np.abs(y_local_pred - recorded_path[:,1]))
+                print("Global Error : " , error_global)
+                print("Local Error : " , error_local)
+
+                if error_local < 0.7 and error_global > 0.7 :
+                    compliant_human = True 
+                    # rospy.set_param('compliant_human' , True)
+                # elif error_local < 0.7: 
+                elif error_local > 0.7 and error_global < 0.7 :
+                    compliant_human = False 
+                    # rospy.set_param('compliant_human' , False)
+                if time.time() - self.initial_time > 5 :
+                    self.attr_msg.compliant_human = compliant_human
+                    self.attr_pub.publish(self.attr_msg)
+
+        except :
+            pass
 
 
     def is_face_visible(self  , input_image) :
@@ -188,7 +256,7 @@ class cohan_attr:
                 self.attr_msg.distance_while_crossing = min_distance
                 self.attr_msg.direction_of_crossing = text
                 self.attr_msg.time_to_cross = time_to_nearest_pose
-                self.attr_pub.publish(self.attr_msg)
+                # self.attr_pub.publish(self.attr_msg)
                 full_text = str(round(time_to_nearest_pose , 2)) + " secs | " + str(round(min_distance , 2)) + "m | " + text
                 # if round(time_to_nearest_pose , 0) == self.trigger_time : 
                 #     nothing = 0
