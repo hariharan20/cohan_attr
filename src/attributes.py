@@ -66,6 +66,10 @@ class cohan_attr:
         self.publish_image = True
         self.last_start_convo = time.time()
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=True)
+        self.pub = rospy.Publisher('/tracked_agents_pose' , PoseStamped   , queue_size=10 )
+        self.global_poly_model = None
+        self.local_poly_model = None
+
         rospy.set_param('reset_human_traj_record' , True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('/tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
@@ -137,6 +141,7 @@ class cohan_attr:
                 if time.time() - self.initial_time > 5:
                     self.attr_msg.compliant_human = compliant_human
                     self.attr_pub.publish(self.attr_msg)
+                    rospy.set_param('reset_human_traj_record' , True)
         except :
             pass
 
