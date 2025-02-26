@@ -20,6 +20,7 @@ from cohan_attr.msg import attr
 from cohan_msgs.msg import TrackedAgents , AgentPathArray
 from geometry_msgs.msg import Pose, PoseArray , PoseStamped
 import time
+from move_base_msgs.msg import MoveBaseActionGoal
 LEN_OF_HUMAN_TRAJ = 10
 
 
@@ -44,7 +45,7 @@ class cohan_attr:
         self.grid_half_size = 30
         ros_pack = rospkg.RosPack()
         self.attr_msg = attr()
-        self.attr_pub = rospy.Publisher('cohan_attr/attr' , attr , queue_size= 1 , latch=True)
+        self.attr_pub = rospy.Publisher('/cohan_attr/attr' , attr , queue_size= 1)
         # self.alert_pub = rospy.Publisher('cohan_attr/attr' , attr , queue_size= 1 , latch=True)
 
         # self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
@@ -76,13 +77,19 @@ class cohan_attr:
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
+        rospy.Subscriber('/move_base/goal', MoveBaseActionGoal, self.goal_cb)
         rospy.Subscriber('/clock' , Clock , self.flag_checker)
         rospy.Timer(rospy.Duration(0.1), self.check_the_plans)
         self.pose_msg = PoseStamped()
         self.tracked_agent_data = None
+        self.goal_set = False
+        self.publish_analysis = False
+        self.pose_msg_array = []
 
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
 
+    def goal_cb(self, msg):
+        self.goal_set = True
     
     def path_extractor(self, plan):
         x = []
@@ -96,9 +103,10 @@ class cohan_attr:
     def tracked_agents_cb(self , data):
         # self.pose_msg_array = []
         self.tracked_agent_data = data 
-        if rospy.get_param('reset_human_traj_record' , False )  :
+        # if rospy.get_param('reset_human_traj_record' , False) and 
+        if self.goal_set:
             self.pose_msg_array = []
-            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray ))
+            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
             self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.human_global_plan[0] , self.human_global_plan[1] , 3 , full=True)
             print(np.sqrt(residuals)/len(self.human_global_plan[0]))
             time.sleep(1)
@@ -106,9 +114,11 @@ class cohan_attr:
             self.initial_time = time.time()
             self.local_poly_model  , residuals , _ ,  _ , _= np.polyfit(self.human_local_plan[0] , self.human_local_plan[1] , 3 , full=True)
             print(np.sqrt(residuals)/len(self.human_local_plan[0]))
+            # rospy.set_param('reset_human_traj_record' , False)
+            self.goal_set = False
+            self.publish_analysis = True
             
-            rospy.set_param('reset_human_traj_record' , False)
-        if len(self.pose_msg_array) == LEN_OF_HUMAN_TRAJ :
+        if len(self.pose_msg_array) == LEN_OF_HUMAN_TRAJ:
             self.pose_msg_array.pop(0)
         self.pose_msg.header.stamp = rospy.Time.now()
         self.pose_msg.header.frame_id = 'map'
@@ -128,9 +138,9 @@ class cohan_attr:
                 y_local_pred = np.polyval(self.local_poly_model , recorded_path[:,0])
                 error_global = np.mean(np.abs(y_global_pred - recorded_path[:,1]))
                 error_local = np.mean(np.abs(y_local_pred - recorded_path[:,1]))
-                print("Global Error : " , error_global)
-                print("Local Error : " , error_local)
-
+                # print("Global Error : " , error_global)
+                # print("Local Error : " , error_local)
+                compliant_human = False
                 if error_local < 0.7 and error_global > 0.7 :
                     compliant_human = True 
                     # rospy.set_param('compliant_human' , True)
@@ -138,10 +148,12 @@ class cohan_attr:
                 elif error_local > 0.7 and error_global < 0.7 :
                     compliant_human = False 
                     # rospy.set_param('compliant_human' , False)
-                if time.time() - self.initial_time > 5:
+                if self.publish_analysis and (time.time() - self.initial_time > 5):
+                    self.publish_analysis = False
                     self.attr_msg.compliant_human = compliant_human
+                    print(self.attr_msg)
                     self.attr_pub.publish(self.attr_msg)
-                    rospy.set_param('reset_human_traj_record' , True)
+                    # rospy.set_param('reset_human_traj_record' , True)
         except :
             pass
 
