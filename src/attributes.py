@@ -98,11 +98,11 @@ class cohan_attr:
         self.tracked_agent_data = data 
         if rospy.get_param('reset_human_traj_record' , False )  :
             self.pose_msg_array = []
-            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
+            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray ))
             self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.human_global_plan[0] , self.human_global_plan[1] , 3 , full=True)
             print(np.sqrt(residuals)/len(self.human_global_plan[0]))
             time.sleep(1)
-            self.human_local_plan = self.path_extractor(rospy.wait_for_message('move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
+            self.human_local_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
             self.initial_time = time.time()
             self.local_poly_model  , residuals , _ ,  _ , _= np.polyfit(self.human_local_plan[0] , self.human_local_plan[1] , 3 , full=True)
             print(np.sqrt(residuals)/len(self.human_local_plan[0]))
