@@ -66,7 +66,7 @@ class cohan_attr:
         self.last_image_sent = time.time()
         self.publish_image = True
         self.last_start_convo = time.time()
-        self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=True)
+        self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=False)
         self.pub = rospy.Publisher('/tracked_agents_pose' , PoseStamped   , queue_size=10 )
         self.global_poly_model = None
         self.local_poly_model = None
@@ -148,7 +148,7 @@ class cohan_attr:
                 elif error_local > 0.7 and error_global < 0.7 :
                     compliant_human = False 
                     # rospy.set_param('compliant_human' , False)
-                if self.publish_analysis and (time.time() - self.initial_time > 5):
+                if self.publish_analysis and (time.time() - self.initial_time > 3):
                     self.publish_analysis = False
                     self.attr_msg.compliant_human = compliant_human
                     print(self.attr_msg)
