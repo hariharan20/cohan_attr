@@ -9,7 +9,7 @@ import tf
 from geometry_msgs.msg import Quaternion
 from rosgraph_msgs.msg import Clock
 import math
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 import json
 import rospkg
 import time 
@@ -18,7 +18,7 @@ from ultralytics import YOLO
 import mediapipe as mp
 from cohan_attr.msg import attr
 from cohan_msgs.msg import TrackedAgents , AgentPathArray
-from geometry_msgs.msg import Pose  , PoseArray , PoseStamped
+from geometry_msgs.msg import Pose, PoseArray , PoseStamped
 import time
 LEN_OF_HUMAN_TRAJ = 10
 
@@ -45,6 +45,7 @@ class cohan_attr:
         ros_pack = rospkg.RosPack()
         self.attr_msg = attr()
         self.attr_pub = rospy.Publisher('cohan_attr/attr' , attr , queue_size= 1 , latch=True)
+        # self.alert_pub = rospy.Publisher('cohan_attr/attr' , attr , queue_size= 1 , latch=True)
 
         # self.img_pub = rospy.Publisher('/map_image' , Image , queue_size =10, latch=True)
         self.angle_pub = rospy.Publisher('/angle', Float64 , queue_size=10, latch=True)
@@ -67,11 +68,14 @@ class cohan_attr:
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=True)
         rospy.set_param('reset_human_traj_record' , True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
-        rospy.Subscriber('tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
+        rospy.Subscriber('/tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
         rospy.Subscriber('/clock' , Clock , self.flag_checker)
+        rospy.Timer(rospy.Duration(0.1), self.check_the_plans)
+        self.pose_msg = PoseStamped()
+        self.tracked_agent_data = None
 
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
 
@@ -86,8 +90,8 @@ class cohan_attr:
         return x , y
     
     def tracked_agents_cb(self , data):
-
         # self.pose_msg_array = []
+        self.tracked_agent_data = data 
         if rospy.get_param('reset_human_traj_record' , False )  :
             self.pose_msg_array = []
             self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
@@ -108,12 +112,12 @@ class cohan_attr:
         self.pose_msg.pose.position.y = data.agents[1].segments[0].pose.pose.position.y
         self.pose_msg.pose.orientation.z = data.agents[1].segments[0].pose.pose.orientation.z
         self.pose_msg.pose.orientation.w = data.agents[1].segments[0].pose.pose.orientation.w
-        self.pub.publish(self.pose_msg)
+        # self.pub.publish(self.pose_msg)
         self.pose_msg_array.append([data.agents[1].segments[0].pose.pose.position.x , data.agents[1].segments[0].pose.pose.position.y])
 
 
     def check_the_plans(self , _):
-        try : 
+        try :
             if len(np.array(self.pose_msg_array).shape) == 2: 
                 recorded_path = np.array(self.pose_msg_array)
                 y_global_pred = np.polyval(self.global_poly_model , recorded_path[:,0])
@@ -130,10 +134,9 @@ class cohan_attr:
                 elif error_local > 0.7 and error_global < 0.7 :
                     compliant_human = False 
                     # rospy.set_param('compliant_human' , False)
-                if time.time() - self.initial_time > 5 :
+                if time.time() - self.initial_time > 5:
                     self.attr_msg.compliant_human = compliant_human
                     self.attr_pub.publish(self.attr_msg)
-
         except :
             pass
 
@@ -179,12 +182,12 @@ class cohan_attr:
             cropped_image = img[math.floor(y_min) : math.floor(y_max) , math.floor(x_min) : math.floor(x_max)]
             # rospy.logerr('CROPPED IMAGE')
             if (x_max - x_min) > 250 and (y_max - y_min) > 600: 
-                if self.publish_image : 
+                if self.publish_image: 
                     if self.is_face_visible(cropped_image):
                         rospy.logerr('FACE VISIBLE')
                         img_msg = bridge.cv2_to_imgmsg(cropped_image ,  encoding="rgb8")
                         self.img_pub.publish(img_msg)
-                        self.alert_pub.publish(String("{data: '{\"bottleneck\": true, \"dialogue\": \"I will pass closely on your left\"}'}"))
+                        # self.alert_pub.publish(String("{data: '{\"bottleneck\": true, \"dialogue\": \"I will pass closely on your left\"}'}"))
                         self.publish_image = False
                         print('published image')
                         rospy.set_param('human_detected' , True)
@@ -205,7 +208,7 @@ class cohan_attr:
         self.clock_flag = False
 
     def agent_cb(self, data):
-        self.last_agent_data =  data.header.stamp 
+        self.last_agent_data =  data.header.stamp
         agent_trajs = data.trajectories
         self.agent_trajs_arr = []
         for agent_traj in agent_trajs :
@@ -303,7 +306,8 @@ class cohan_attr:
         min_distance = 1000000
         min_time = 100
         if self.last_agent_data < (data.header.stamp - rospy.Duration(1)) :
-            tracked_agent_data = rospy.wait_for_message('/tracked_agents' , TrackedAgents , timeout=4.0)
+            # tracked_agent_data = rospy.wait_for_message('/tracked_agents' , TrackedAgents , timeout=4.0)
+            tracked_agent_data = self.tracked_agent_data
             nearest_agent_id = "Not yet initialized ----"
             for k , agent in enumerate(tracked_agent_data.agents):
                 agent_pose = [agent.segments[0].pose.pose.position.x , agent.segments[0].pose.pose.position.y]
