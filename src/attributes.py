@@ -106,7 +106,7 @@ class cohan_attr:
         # if rospy.get_param('reset_human_traj_record' , False) and 
         if self.goal_set:
             self.pose_msg_array = []
-            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
+            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray ))
             self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.human_global_plan[0] , self.human_global_plan[1] , 3 , full=True)
             print(np.sqrt(residuals)/len(self.human_global_plan[0]))
             time.sleep(1)
@@ -148,7 +148,7 @@ class cohan_attr:
                 elif error_local > 0.7 and error_global < 0.7 :
                     compliant_human = False 
                     # rospy.set_param('compliant_human' , False)
-                if self.publish_analysis and (time.time() - self.initial_time > 3):
+                if self.publish_analysis and (time.time() - self.initial_time > 1):
                     self.publish_analysis = False
                     self.attr_msg.compliant_human = compliant_human
                     print(self.attr_msg)
