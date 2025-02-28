@@ -20,9 +20,11 @@ from cohan_attr.msg import attr
 from cohan_msgs.msg import TrackedAgents , AgentPathArray
 from geometry_msgs.msg import Pose, PoseArray , PoseStamped
 import time
+from visualization_msgs.msg import Marker
 from move_base_msgs.msg import MoveBaseActionGoal
-LEN_OF_HUMAN_TRAJ = 10
+from geometry_msgs.msg import Point
 
+LEN_OF_HUMAN_TRAJ = 10
 
 fd = mp.solutions.face_detection
 from cv_bridge import CvBridge
@@ -87,11 +89,45 @@ class cohan_attr:
         self.pose_msg_array = []
         self.agent_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/agent_radius')
         self.robot_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/robot_radius')
+        self.marker_pub = rospy.Publisher('/cylinder_marker', Marker, queue_size=10)
+
 
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
 
     def goal_cb(self, msg):
         self.goal_set = True
+        
+    def publish_marker(self, x, y):
+        marker = Marker()
+        marker.header.frame_id = "map"  # Change to "odom" or "base_link" as needed
+        marker.header.stamp = rospy.Time.now()
+        marker.ns = "cylinder"
+        marker.id = 0
+        marker.type = Marker.CYLINDER  # Cylinder shape
+        marker.action = Marker.ADD
+
+        # Position & Orientation
+        marker.pose.position.x = x
+        marker.pose.position.y = y
+        marker.pose.position.z = 1.0  # Center of the cylinder
+        marker.pose.orientation.x = 0.0
+        marker.pose.orientation.y = 0.0
+        marker.pose.orientation.z = 0.0
+        marker.pose.orientation.w = 1.0
+
+        # Cylinder scale (diameter and height)
+        marker.scale.x = 0.2 # Diameter
+        marker.scale.y = 0.2  # Diameter
+        marker.scale.z = 1.0  # Height
+
+        # Color (RGBA)
+        marker.color.r = 0.0
+        marker.color.g = 0.5
+        marker.color.b = 1.0
+        marker.color.a = 1.0  # Fully opaque
+
+        marker.lifetime = rospy.Duration(1)  # Permanent
+        self.marker_pub.publish(marker)
     
     def path_extractor(self, plan):
         x = []
@@ -150,7 +186,7 @@ class cohan_attr:
                 elif error_local > 0.7 and error_global < 0.7 :
                     compliant_human = False 
                     # rospy.set_param('compliant_human' , False)
-                if self.publish_analysis and (time.time() - self.initial_time > 1):
+                if self.publish_analysis and (time.time() - self.initial_time > 5):
                     self.publish_analysis = False
                     self.attr_msg.compliant_human = compliant_human
                     print(self.attr_msg)
@@ -358,6 +394,7 @@ class cohan_attr:
             self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle]  , self.robot_tfs_arr[min_index] , min_distance)
             time.sleep(0.1)
             self.distance_to_nearest_door(self.robot_pts_arr[min_index] , min_distance , agent_pose , self.robot_pts_arr[0] , self.robot_pts_arr)
+            self.publish_marker(self.robot_pts_arr[min_index][0], self.robot_pts_arr[min_index][1])
 
 
 if __name__ == "__main__":
