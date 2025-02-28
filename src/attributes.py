@@ -85,6 +85,8 @@ class cohan_attr:
         self.goal_set = False
         self.publish_analysis = False
         self.pose_msg_array = []
+        self.agent_radius = rospy.get_param('/move_base/HATebLocalPlanner/agent_radius')
+        self.robot_radius = rospy.get_param('/move_base/HATebLocalPlanner/robot_radius')
 
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
 
@@ -273,7 +275,7 @@ class cohan_attr:
                 slope_difference = math.atan(robot_slope) - human_slope
                 self.angle_pub.publish(Float64(rad_to_deg(slope_difference)))
                 text = self.slope_conditions(rad_to_deg(slope_difference) , robot_pts_wrt_human)
-                self.attr_msg.distance_while_crossing = min_distance
+                self.attr_msg.distance_while_crossing = min_distance - (self.agent_radius + self.robot_radius)
                 self.attr_msg.direction_of_crossing = text
                 self.attr_msg.time_to_cross = time_to_nearest_pose
                 # self.attr_pub.publish(self.attr_msg)
