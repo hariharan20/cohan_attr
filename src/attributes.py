@@ -85,8 +85,8 @@ class cohan_attr:
         self.goal_set = False
         self.publish_analysis = False
         self.pose_msg_array = []
-        self.agent_radius = rospy.get_param('/move_base/HATebLocalPlanner/agent_radius')
-        self.robot_radius = rospy.get_param('/move_base/HATebLocalPlanner/robot_radius')
+        self.agent_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/agent_radius')
+        self.robot_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/robot_radius')
 
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
 
