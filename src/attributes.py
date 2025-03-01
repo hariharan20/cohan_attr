@@ -272,7 +272,7 @@ class cohan_attr:
             self.agent_orientation_arr = []
             for i , points in enumerate(agent_traj.trajectory.points ):
                 if points.time_from_start > rospy.Duration(0.0):
-                    self.agent_tfs_arr.append(points.time_from_start)
+                    self.agent_tfs_arr.append(points.time_from_start.to_sec())
                     agent_orientation = quat_to_euler(points.transform.rotation.z , points.transform.rotation.w)
                     self.agent_pts_arr.append([points.transform.translation.x , points.transform.translation.y ])
                     self.agent_orientation_arr.append(agent_orientation)
@@ -349,6 +349,24 @@ class cohan_attr:
             text ='Following the human and moving to the right of'
         
         return text
+    
+    def crossing_point_calc(self , robot_pts_arr , robot_tfs_arr , human_pts_arr , human_tfs_arr):
+        robot_pts_arr = np.array(robot_pts_arr)
+        human_pts_arr = np.array(human_pts_arr)
+        # human_tfs_arr = np.array(human_tfs_arr)
+        # robot_tfs_arr = np.array(robot_tfs_arr)
+        min_distance = 1000000
+        for j  ,[robot_tfs , robot_pts] in enumerate(zip(robot_tfs_arr , robot_pts_arr)):
+            for  i , human_tfs in enumerate(human_tfs_arr): 
+                if human_tfs - robot_tfs > 0.1 : 
+                    if human_tfs - robot_tfs < 0.5:
+                        distance = np.linalg.norm(robot_pts - human_pts_arr[i])
+                        if distance < min_distance:
+                            min_distance = distance
+                            # min_index = np.where(robot_pts_arr == robot_pts)[0][0]
+                            min_index = j
+                            agent_index = i
+        return min_index , min_distance , agent_index
 
     def robot_cb(self , data):
         self.robot_pts_arr = []
@@ -375,17 +393,18 @@ class cohan_attr:
             agent_angle = quat_to_euler(tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.orientation.z , tracked_agent_data.agents[nearest_agent_id].segments[0].pose.pose.orientation.w)
 
         else:    
-            min_distance = 10000
-            for z , agent_traj in enumerate(self.agent_trajs_arr):
-                if len(agent_traj[1]) == 0 :
-                    continue
-                index , distance , agent_index = self.min_distance_calc(self.robot_pts_arr , agent_traj[1])
-                if distance < min_distance :
-                    min_distance = distance
-                    min_index = index 
-                    nearest_agent_id = z 
-                    nearest_agent_traj_index = agent_index
             try : 
+                min_distance = 10000
+                for z , agent_traj in enumerate(self.agent_trajs_arr):
+                    if len(agent_traj[1]) == 0 :
+                        continue
+                    # index , distance , agent_index = self.min_distance_calc(self.robot_pts_arr , agent_traj[1])
+                    index , distance , agent_index = self.crossing_point_calc(self.robot_pts_arr , self.robot_tfs_arr , agent_traj[1] , agent_traj[0])
+                    if distance < min_distance :
+                        min_distance = distance
+                        min_index = index 
+                        nearest_agent_id = z 
+                        nearest_agent_traj_index = agent_index
                 agent_pose= self.agent_trajs_arr[nearest_agent_id][1][nearest_agent_traj_index]
                 agent_angle= self.agent_trajs_arr[nearest_agent_id][2][nearest_agent_traj_index]
             except : 
