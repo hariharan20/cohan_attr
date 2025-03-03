@@ -17,7 +17,7 @@ from ultralytics import YOLO
 # from mediapipe import *
 import mediapipe as mp
 from cohan_attr.msg import attr
-from cohan_msgs.msg import TrackedAgents , AgentPathArray
+from cohan_msgs.msg import TrackedAgents , AgentPathArray, CrossingInfo
 from geometry_msgs.msg import Pose, PoseArray , PoseStamped
 import time
 from visualization_msgs.msg import Marker
@@ -75,6 +75,7 @@ class cohan_attr:
 
         rospy.set_param('reset_human_traj_record' , True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
+        rospy.Subscriber('move_base/HATebLocalPlannerROS/crossing_info' , CrossingInfo, self.crossing_cb )
         rospy.Subscriber('/tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
@@ -87,12 +88,16 @@ class cohan_attr:
         self.goal_set = False
         self.publish_analysis = False
         self.pose_msg_array = []
+        self.crossing_info = []
         self.agent_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/agent_radius')
         self.robot_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/robot_radius')
         self.marker_pub = rospy.Publisher('/cylinder_marker', Marker, queue_size=10)
 
 
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
+        
+    def crossing_cb(self, msg):
+        self.crossing_info = msg
 
     def goal_cb(self, msg):
         self.goal_set = True
@@ -186,7 +191,7 @@ class cohan_attr:
                 elif error_local > 0.7 and error_global < 0.7 :
                     compliant_human = False 
                     # rospy.set_param('compliant_human' , False)
-                if self.publish_analysis and (time.time() - self.initial_time > 5):
+                if self.publish_analysis and (time.time() - self.initial_time > 2):
                     self.publish_analysis = False
                     self.attr_msg.compliant_human = compliant_human
                     print(self.attr_msg)
@@ -311,9 +316,11 @@ class cohan_attr:
                 slope_difference = math.atan(robot_slope) - human_slope
                 self.angle_pub.publish(Float64(rad_to_deg(slope_difference)))
                 text = self.slope_conditions(rad_to_deg(slope_difference) , robot_pts_wrt_human)
-                self.attr_msg.distance_while_crossing = min_distance - (self.agent_radius + self.robot_radius)
                 self.attr_msg.direction_of_crossing = text
-                self.attr_msg.time_to_cross = time_to_nearest_pose
+                if self.crossing_info:
+                    if self.crossing_info.times:
+                        self.attr_msg.distance_while_crossing = self.crossing_info.distances[0] - (self.agent_radius + self.robot_radius)
+                        self.attr_msg.time_to_cross = self.crossing_info.times[0]
                 # self.attr_pub.publish(self.attr_msg)
                 full_text = str(round(time_to_nearest_pose , 2)) + " secs | " + str(round(min_distance , 2)) + "m | " + text
                 # if round(time_to_nearest_pose , 0) == self.trigger_time : 
