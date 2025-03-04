@@ -23,6 +23,9 @@ import time
 from visualization_msgs.msg import Marker
 from move_base_msgs.msg import MoveBaseActionGoal
 from geometry_msgs.msg import Point
+from nav_msgs.msg import Path
+from scipy.spatial import KDTree
+
 
 LEN_OF_HUMAN_TRAJ = 10
 
@@ -71,7 +74,9 @@ class cohan_attr:
         self.img_pub = rospy.Publisher('/cohan_attr/human_image'  , Image , queue_size=1, latch=False)
         self.pub = rospy.Publisher('/tracked_agents_pose' , PoseStamped   , queue_size=10 )
         self.global_poly_model = None
+        self.robot_global_poly_model = None
         self.local_poly_model = None
+        self.tree = None
 
         rospy.set_param('reset_human_traj_record' , True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
@@ -79,6 +84,7 @@ class cohan_attr:
         rospy.Subscriber('/tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
+        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_plan' , Path , self.robot_plan_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
         rospy.Subscriber('/move_base/goal', MoveBaseActionGoal, self.goal_cb)
         rospy.Subscriber('/clock' , Clock , self.flag_checker)
@@ -88,11 +94,12 @@ class cohan_attr:
         self.goal_set = False
         self.publish_analysis = False
         self.pose_msg_array = []
-        self.crossing_info = []
+        self.crossing_info = CrossingInfo()
+        self.crossing_points_array = []
+        self.last_crossing_check = time.time()
         self.agent_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/agent_radius')
         self.robot_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/robot_radius')
         self.marker_pub = rospy.Publisher('/cylinder_marker', Marker, queue_size=10)
-
 
         # rospy.Subscriber('/clock' , Clock , self.clock_cb )
         
@@ -143,15 +150,35 @@ class cohan_attr:
             y.append(pose.pose.position.y)
         return x , y
     
+    def robot_path_extractor(self, plan):
+        x = []
+        y = []
+        poses = []
+        # print(len(plan.paths))
+        for pose in plan.poses : 
+            x.append(pose.pose.position.x)
+            y.append(pose.pose.position.y)
+            poses.append([pose.pose.position.x, pose.pose.position.y])
+        return poses
+    
     def tracked_agents_cb(self , data):
         # self.pose_msg_array = []
         self.tracked_agent_data = data 
         # if rospy.get_param('reset_human_traj_record' , False) and 
         if self.goal_set:
             self.pose_msg_array = []
+            self.crossing_points_array = []
+            self.robot_global_plan = []
+            self.tree = None
             self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray ))
             self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.human_global_plan[0] , self.human_global_plan[1] , 3 , full=True)
             print(np.sqrt(residuals)/len(self.human_global_plan[0]))
+            
+            self.robot_global_plan = self.robot_path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/global_plan', Path ))
+            # self.robot_global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.robot_global_plan[0] , self.robot_global_plan[1] , 3 , full=True)
+            self.tree = KDTree(self.robot_global_plan)
+            print(np.sqrt(residuals)/len(self.robot_global_plan[0]))
+            
             time.sleep(1)
             self.human_local_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
             self.initial_time = time.time()
@@ -172,6 +199,26 @@ class cohan_attr:
         # self.pub.publish(self.pose_msg)
         self.pose_msg_array.append([data.agents[1].segments[0].pose.pose.position.x , data.agents[1].segments[0].pose.pose.position.y])
 
+    def robot_plan_cb(self, msg):
+        if self.crossing_info.indices:
+            if self.crossing_info.indices[0] < 10 and not self.goal_set:
+                cp = np.array([msg.poses[0].pose.position.x, msg.poses[0].pose.position.y])
+                distance, index = self.tree.query((cp[0], cp[1]))
+                gp = np.array(self.robot_global_plan[index])
+                self.crossing_points_array.append(np.linalg.norm(gp-cp))
+                self.last_crossing_check = time.time()
+        else:
+            if time.time() - self.last_crossing_check > 2.0 and self.crossing_points_array:
+               diff = max(self.crossing_points_array) - min(self.crossing_points_array)
+               if diff > 0.3:
+                   print("The robot has contributed more than planned")
+                   print(diff)
+               elif diff <= 0.3:
+                   print("The robot moved as planned!")
+                   print(diff)
+                   
+               self.crossing_points_array = []
+        
 
     def check_the_plans(self , _):
         try :
