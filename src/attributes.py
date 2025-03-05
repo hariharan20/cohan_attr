@@ -25,6 +25,7 @@ from move_base_msgs.msg import MoveBaseActionGoal
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Path
 from scipy.spatial import KDTree
+import copy
 
 
 LEN_OF_HUMAN_TRAJ = 10
@@ -77,6 +78,7 @@ class cohan_attr:
         self.robot_global_poly_model = None
         self.local_poly_model = None
         self.tree = None
+        self.human_tree = None
 
         rospy.set_param('reset_human_traj_record' , True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
@@ -86,6 +88,7 @@ class cohan_attr:
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
         rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_plan' , Path , self.robot_plan_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
+        # rospy.Subscriber('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray , self.agents_global_plans_cb) 
         rospy.Subscriber('/move_base/goal', MoveBaseActionGoal, self.goal_cb)
         rospy.Subscriber('/clock' , Clock , self.flag_checker)
         rospy.Timer(rospy.Duration(0.1), self.check_the_plans)
@@ -96,6 +99,7 @@ class cohan_attr:
         self.pose_msg_array = []
         self.crossing_info = CrossingInfo()
         self.crossing_points_array = []
+        self.human_crossing_points_array = []   
         self.last_crossing_check = time.time()
         self.agent_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/agent_radius')
         self.robot_radius = rospy.get_param('/move_base/HATebLocalPlannerROS/robot_radius')
@@ -109,6 +113,13 @@ class cohan_attr:
     def goal_cb(self, msg):
         self.goal_set = True
         
+    def agents_global_plans_cb(self , data):
+        self.human_global_plan = self.human_path_extractor(data)
+        self.human_tree = KDTree(self.human_global_plan)
+        # self.human_global_plan = self.path_extractor(data)
+        # print(np.array(self.human_global_plan)[: , 1].shape)
+        human_plan_np = np.array(self.human_global_plan)
+        self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(human_plan_np[: , 0] , human_plan_np[: , 1] , 3 , full=True)
     def publish_marker(self, x, y):
         marker = Marker()
         marker.header.frame_id = "map"  # Change to "odom" or "base_link" as needed
@@ -150,6 +161,12 @@ class cohan_attr:
             y.append(pose.pose.position.y)
         return x , y
     
+    def human_path_extractor(self , plan):
+        poses = []
+        for pose in plan.paths[0].path.poses :
+            poses.append([pose.pose.position.x, pose.pose.position.y])
+        return poses
+
     def robot_path_extractor(self, plan):
         x = []
         y = []
@@ -161,32 +178,75 @@ class cohan_attr:
             poses.append([pose.pose.position.x, pose.pose.position.y])
         return poses
     
+    def detect_outliers_iqr(self, data):
+        Q1 = np.percentile(data, 25)
+        Q3 = np.percentile(data, 75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        return [x for x in data if x < lower_bound or x > upper_bound]
+
+
+
+    def human_contribution(self ):
+        # print('INSIDE HUMAN CONTRIBUTION')
+        if self.crossing_info.indices:
+            cp = np.array([self.human_local_plan[0][self.crossing_info.indices[0]] , self.human_local_plan[1][self.crossing_info.indices[0]]])
+            distance, index = self.human_tree.query((cp[0], cp[1]))
+            gp = np.array(self.human_global_plan[index])
+            # print(cp , gp)
+            self.human_crossing_points_array.append(np.linalg.norm(gp-cp))
+
+            # print(self.human_crossing_points_array)
+            if len(self.human_crossing_points_array) == 12: 
+                human_crossing_point_copy = copy.deepcopy(self.human_crossing_points_array)
+                outliers = self.detect_outliers_iqr(human_crossing_point_copy)
+                print(outliers)
+                for outlier in outliers : 
+                    outlier_index = human_crossing_point_copy.index(outlier)
+                    human_crossing_point_copy.pop(outlier_index)            
+                diff = max(human_crossing_point_copy[3 : ]) - min(human_crossing_point_copy[3 : ])
+                if diff > 0.3:
+                    print("The Human needs to contribute more")
+                    print(diff)
+                elif diff <= 0.3:
+                    print("The Human has contributed as planned")
+                    print(diff)
+                
     def tracked_agents_cb(self , data):
         # self.pose_msg_array = []
         self.tracked_agent_data = data 
         # if rospy.get_param('reset_human_traj_record' , False) and 
         if self.goal_set:
+            self.human_crossing_points_array = []   
             self.pose_msg_array = []
             self.crossing_points_array = []
             self.robot_global_plan = []
             self.tree = None
-            self.human_global_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray ))
-            self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.human_global_plan[0] , self.human_global_plan[1] , 3 , full=True)
-            print(np.sqrt(residuals)/len(self.human_global_plan[0]))
-            
+            # print(np.sqrt(residuals)/len(self.human_global_plan[0]))
+            # print(np.array(self.human_global_plan).shape)/
             self.robot_global_plan = self.robot_path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/global_plan', Path ))
             # self.robot_global_poly_model, residuals , _ ,  _ , _ = np.polyfit(self.robot_global_plan[0] , self.robot_global_plan[1] , 3 , full=True)
             self.tree = KDTree(self.robot_global_plan)
-            print(np.sqrt(residuals)/len(self.robot_global_plan[0]))
+            # print(np.array(self.robot_global_plan).shape)
+            # print(np.sqrt(residuals)/len(self.robot_global_plan[0]))
             
             time.sleep(1)
-            self.human_local_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
             self.initial_time = time.time()
-            self.local_poly_model  , residuals , _ ,  _ , _= np.polyfit(self.human_local_plan[0] , self.human_local_plan[1] , 3 , full=True)
-            print(np.sqrt(residuals)/len(self.human_local_plan[0]))
+            # print(np.sqrt(residuals)/len(self.human_local_plan[0]))
             # rospy.set_param('reset_human_traj_record' , False)
+            print(self.human_tree) 
             self.goal_set = False
             self.publish_analysis = True
+            time.sleep(1)
+        if self.publish_analysis :
+            self.human_global_plan = self.human_path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray))
+            self.human_tree = KDTree(self.human_global_plan)
+            human_plan_np = np.array(self.human_global_plan)
+            self.global_poly_model, residuals , _ ,  _ , _ = np.polyfit(human_plan_np[: , 0] , human_plan_np[: , 1] , 3 , full=True)
+            self.human_local_plan = self.path_extractor(rospy.wait_for_message('/move_base/HATebLocalPlannerROS/agents_local_plans' , AgentPathArray ))
+            self.local_poly_model  , residuals , _ ,  _ , _= np.polyfit(self.human_local_plan[0] , self.human_local_plan[1] , 3 , full=True)
+            self.human_contribution()
             
         if len(self.pose_msg_array) == LEN_OF_HUMAN_TRAJ:
             self.pose_msg_array.pop(0)
@@ -203,6 +263,7 @@ class cohan_attr:
         if self.crossing_info.indices:
             if self.crossing_info.indices[0] < 10 and not self.goal_set:
                 cp = np.array([msg.poses[0].pose.position.x, msg.poses[0].pose.position.y])
+                # print(cp)
                 distance, index = self.tree.query((cp[0], cp[1]))
                 gp = np.array(self.robot_global_plan[index])
                 self.crossing_points_array.append(np.linalg.norm(gp-cp))
