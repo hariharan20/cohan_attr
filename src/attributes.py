@@ -34,6 +34,97 @@ fd = mp.solutions.face_detection
 from cv_bridge import CvBridge
 bridge = CvBridge()
 
+
+angle_dict ={
+    'follow_and_by_l' : [30 , 'left' , 'behind'],
+    'follow_and_by_r' : [330, 'right' , 'behind'],
+    'by_r' : [210 , 'right' , 'front'],
+    'by_l' : [150 , 'left' , 'front'],
+    'cross_behind_from_l' : [240 , 'left' , 'behind'], 
+    'cross_behind_from_r' : [120 , 'right' , 'behind'],
+    'cross_in_front_from_l' : [300 , 'left' , 'front'],
+    'cross_in_front_from_r' : [60 , 'right' , 'front'],
+    # 'collision_left' : [270 , 'left' , 'front'],
+    # 'collision_right' : [90 , 'right' , 'front'],
+    # 'collision_behind' : [180 , 'left' , 'front'],
+    # 'collision_front' : [0 , 'right' , 'front'],
+    # 'avoid_left' : [270 , 'left', 'behind'],
+    # 'avoid_right' : [90 , 'right', 'behind'],
+    # 'avoid_behind' : [180 , 'left', 'behind'],
+    # 'avoid_front' : [0 , 'right', 'behind'],
+}
+
+position_dict = {
+    ('left' , 'behind') : {
+        1 : 'follow_and_by_l',
+        90 : 'cross_behind_from_l',
+        180 : 'by_l',
+        270 : 'cross_behind_from_r',
+        359 : 'follow_and_by_l',
+    },
+    ('right' , 'behind') : {
+        1 : 'follow_and_by_r',
+        90 : 'cross_behind_from_l',
+        180 : 'by_r',
+        270 : 'cross_behind_from_r',
+        359 : 'follow_and_by_r',
+    },
+    ('left' , 'front') : {
+        1 : 'follow_and_by_l',
+        90 : 'cross_in_front_from_l',
+        180 : 'by_l',
+        270 : 'cross_in_front_from_r',
+        359 : 'follow_and_by_l',
+
+    },
+    ('right' , 'front') : {
+        0 : 'follow_and_by_r',
+        90 : 'crossin_front_from_l',
+        180 : 'by_r',
+        270 : 'cross_in_front_from_r',
+        359 : 'follow_and_by_r',
+    },
+}
+
+# position_dict_keys = list(position_dict.keys())
+
+def rad_to_deg2(rad) : 
+    if rad < 0 : 
+        return 360 + (rad *180 / math.pi)
+    return rad * 180 / math.pi
+
+def get_angle_condition(behind_or_front , left_or_right):
+    list_of_angle = []
+    list_of_condition = []
+    for key , value in angle_dict.items():
+        if value[1] == left_or_right and value[2] == behind_or_front:
+            list_of_angle.append(value[0]) 
+            list_of_condition.append(key)
+    return list_of_angle , list_of_condition
+
+def get_direction_from_position_dict(behind_or_front , left_or_right , angle_of_robot_wrt_human):
+    angle_dict = position_dict[(left_or_right , behind_or_front)]
+    angle_dict_keys = list(angle_dict.keys())
+    angle_dict_keys = np.array(angle_dict_keys)
+    angle_difference = np.abs(angle_dict_keys - angle_of_robot_wrt_human)
+    min_index = np.argmin(angle_difference)
+    return angle_dict[angle_dict_keys[min_index]]
+
+
+def get_pose_wrt_human(robot_position , human_position , human_heading_dx , human_heading_dy):
+    d1 = (robot_position[0] - human_position[0]) * (human_heading_dy) - (robot_position[1] - human_position[1]) * (human_heading_dx)
+    d1_orthogonal = (robot_position[0] - human_position[0]) * (-human_heading_dx) - (robot_position[1] - human_position[1]) * (human_heading_dy)
+    if d1 > 0:
+        left_or_right = 'right'
+    else:
+        left_or_right = 'left'
+    if d1_orthogonal > 0:
+        front_or_behind = 'behind'
+    else:
+        front_or_behind = 'front'
+    return left_or_right, front_or_behind
+
+
 # import ros_numpy 
 def quat_to_euler(w , z):
     euler_angles = tf.transformations.euler_from_quaternion([0 , 0  , z , w])
@@ -79,14 +170,20 @@ class cohan_attr:
         self.local_poly_model = None
         self.tree = None
         self.human_tree = None
+        self.attr_image_np = np.ones((500 , 500 , 3) , dtype=np.uint8) * 255
+        cv2.putText(self.attr_image_np , 'Attributes' , (100 , 250) , cv2.FONT_HERSHEY_SIMPLEX , 1 , (0,0,0) , 2)
+        self.image_msg = bridge.cv2_to_imgmsg(self.attr_image_np ,  encoding="rgb8")
+        self.image_pub = rospy.Publisher('attributes_from_cohan' , Image , queue_size=1 , latch=True)
+        self.image_pub.publish(self.image_msg)
 
         rospy.set_param('reset_human_traj_record' , True)
         rospy.Subscriber('move_base/HATebLocalPlannerROS/agents_local_trajs' , AgentTrajectoryArray, self.agent_cb )
         rospy.Subscriber('move_base/HATebLocalPlannerROS/crossing_info' , CrossingInfo, self.crossing_cb )
         rospy.Subscriber('/tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
-        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
-        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_plan' , Path , self.robot_plan_cb)
+        # rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
+        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.ecohan_cb)
+        # rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_plan' , Path , self.robot_plan_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
         # rospy.Subscriber('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray , self.agents_global_plans_cb) 
         rospy.Subscriber('/move_base/goal', MoveBaseActionGoal, self.goal_cb)
@@ -235,7 +332,7 @@ class cohan_attr:
             self.initial_time = time.time()
             # print(np.sqrt(residuals)/len(self.human_local_plan[0]))
             # rospy.set_param('reset_human_traj_record' , False)
-            print(self.human_tree) 
+            # print(self.human_tree) 
             self.goal_set = False
             self.publish_analysis = True
             time.sleep(1)
@@ -302,7 +399,7 @@ class cohan_attr:
                 if self.publish_analysis and (time.time() - self.initial_time > 2):
                     self.publish_analysis = False
                     self.attr_msg.compliant_human = compliant_human
-                    print(self.attr_msg)
+                    # print(self.attr_msg)
                     self.attr_pub.publish(self.attr_msg)
                     # rospy.set_param('reset_human_traj_record' , True)
         except :
@@ -390,49 +487,53 @@ class cohan_attr:
                     self.agent_pts_arr.append([points.transform.translation.x , points.transform.translation.y ])
                     self.agent_orientation_arr.append(agent_orientation)
             self.agent_trajs_arr.append([self.agent_tfs_arr, self.agent_pts_arr , self.agent_orientation_arr])
+        # print(len(self.agent_trajs_arr))
     
-    def min_distance_calc(self , arr1 , arr2) : 
-        arr1_np =  np.array(arr1)
-        arr2_np =  np.array(arr2)
-        min_index = 1000
-        min_distance = 1000
-        id_ = len(arr2_np.shape) -1
-        for i , arr1_np_ in enumerate(arr1_np):
-            distance = np.linalg.norm(arr1_np_ - arr2_np , axis = id_)
-            if np.min(distance) < min_distance :
-                min_index = i
-                min_agent_index = np.argmin(distance)
-                min_distance = np.min(distance)
-        return min_index , min_distance , min_agent_index
+    # def min_distance_calc(self , arr1 , arr2) : 
+    #     arr1_np =  np.array(arr1)
+    #     arr2_np =  np.array(arr2)
+    #     min_index = 1000
+    #     min_distance = 1000
+    #     id_ = len(arr2_np.shape) -1
+    #     for i , arr1_np_ in enumerate(arr1_np):
+    #         distance = np.linalg.norm(arr1_np_ - arr2_np , axis = id_)
+    #         if np.min(distance) < min_distance :
+    #             min_index = i
+    #             min_agent_index = np.argmin(distance)
+    #             min_distance = np.min(distance)
+    #     return min_index , min_distance , min_agent_index
         
-    def avg_slope(self, pts):
-        pts = np.array(pts)
-        if not len(pts.shape) == 2:
-            return None 
-        # print(pts[: , 1].shape)
-        result = scipy.stats.linregress(pts[:,0] , pts[:,1])
-        return result.slope
+    # def avg_slope(self, pts):
+    #     pts = np.array(pts)
+    #     if not len(pts.shape) == 2:
+    #         return None 
+    #     # print(pts[: , 1].shape)
+    #     result = scipy.stats.linregress(pts[:,0] , pts[:,1])
+    #     return result.slope
 
-    def direction_of_crossing_static(self , robot_pts_arr , robot_index , human_pose , time_to_nearest_pose , min_distance):
-        robot_pts_slice = robot_pts_arr[robot_index-10 : robot_index]
-        robot_pts_slice_np = np.array(robot_pts_slice)
-        robot_slope = self.avg_slope(robot_pts_slice)
-        if not type(robot_slope) == type(None):
-            if not np.isnan(robot_slope): 
-                robot_pts_wrt_human = robot_pts_slice_np - np.array([human_pose[0] , human_pose[1]])
-                human_slope = human_pose[2]
-                slope_difference = math.atan(robot_slope) - human_slope
-                self.angle_pub.publish(Float64(rad_to_deg(slope_difference)))
-                text = self.slope_conditions(rad_to_deg(slope_difference) , robot_pts_wrt_human)
-                self.attr_msg.direction_of_crossing = text
-                if self.crossing_info:
-                    if self.crossing_info.times:
-                        self.attr_msg.distance_while_crossing = self.crossing_info.distances[0] - (self.agent_radius + self.robot_radius)
-                        self.attr_msg.time_to_cross = self.crossing_info.times[0]
-                # self.attr_pub.publish(self.attr_msg)
-                full_text = str(round(time_to_nearest_pose , 2)) + " secs | " + str(round(min_distance , 2)) + "m | " + text
-                # if round(time_to_nearest_pose , 0) == self.trigger_time : 
-                #     nothing = 0
+    # def direction_of_crossing_static(self , robot_pts_arr , robot_index , human_pose , time_to_nearest_pose , min_distance):
+    #     robot_pts_slice = robot_pts_arr[robot_index-10 : robot_index]
+    #     robot_pts_slice_np = np.array(robot_pts_slice)
+    #     robot_slope = self.avg_slope(robot_pts_slice)
+    #     if not type(robot_slope) == type(None):
+    #         if not np.isnan(robot_slope): 
+    #             robot_pts_wrt_human = robot_pts_slice_np - np.array([human_pose[0] , human_pose[1]])
+    #             human_slope = human_pose[2]
+    #             # print(human_slope)
+                
+    #             slope_difference = rad_to_euler(math.atan(robot_slope) - human_slope) 
+    #             # slope_difference = math.atan(robot_slope) - human_slope
+    #             self.angle_pub.publish(Float64(rad_to_deg(slope_difference)))
+    #             # text = self.slope_conditions(rad_to_deg(slope_difference) , robot_pts_wrt_human)
+    #             self.attr_msg.direction_of_crossing = text
+    #             if self.crossing_info:
+    #                 if self.crossing_info.times:
+    #                     self.attr_msg.distance_while_crossing = self.crossing_info.distances[0] - (self.agent_radius + self.robot_radius)
+    #                     self.attr_msg.time_to_cross = self.crossing_info.times[0]
+    #             # self.attr_pub.publish(self.attr_msg)
+    #             full_text = str(round(time_to_nearest_pose , 2)) + " secs | " + str(round(min_distance , 2)) + "m | " + text
+    #             # if round(time_to_nearest_pose , 0) == self.trigger_time : 
+    #             #     nothing = 0
 
     def distance_to_nearest_door(self, robot_point , min_distance , agent_pose , robot_current_pose , robot_pts_arr):
         dis_to_door_list = np.linalg.norm(np.array(self.door_centers) - np.array(robot_point) , axis=1)
@@ -449,39 +550,80 @@ class cohan_attr:
                 # time.sleep(20)
                 # self.start_convo = True
 
-    def slope_conditions(self, slope_difference , robot_pts_wrt_human):
-        if slope_difference < 90 and slope_difference > 45 :
-            text = 'Moving in Front of the human '
-        elif slope_difference >90 :
-            text ='Moving to the Left of' 
-        elif slope_difference < 45 and slope_difference >=0 :
-            text ='Moving to the Right of '
-        elif slope_difference > -90 and slope_difference<-45 :
-            text ='Moving behind of the human'
-        elif slope_difference < -90 : 
-            text ='Following the human and moving to the left of'
-        elif slope_difference >-45 and slope_difference <0:
-            text ='Following the human and moving to the right of'
+    # def slope_conditions(self, slope_difference , robot_pts_wrt_human):
+    #     if slope_difference < 90 and slope_difference > 45 :
+    #         text = 'Moving in Front of the human '
+    #     elif slope_difference >90 :
+    #         text ='Moving to the Left of' 
+    #     elif slope_difference < 45 and slope_difference >=0 :
+    #         text ='Moving to the Right of '
+    #     elif slope_difference > -90 and slope_difference<-45 :
+    #         text ='Moving behind of the human'
+    #     elif slope_difference < -90 : 
+    #         text ='Following the human and moving to the left of'
+    #     elif slope_difference >-45 and slope_difference <0:
+    #         text ='Following the human and moving to the right of'
         
-        return text
+    #     return text
     
-    def crossing_point_calc(self , robot_pts_arr , robot_tfs_arr , human_pts_arr , human_tfs_arr):
-        robot_pts_arr = np.array(robot_pts_arr)
-        human_pts_arr = np.array(human_pts_arr)
-        # human_tfs_arr = np.array(human_tfs_arr)
-        # robot_tfs_arr = np.array(robot_tfs_arr)
-        min_distance = 1000000
-        for j  ,[robot_tfs , robot_pts] in enumerate(zip(robot_tfs_arr , robot_pts_arr)):
-            for  i , human_tfs in enumerate(human_tfs_arr): 
-                if human_tfs - robot_tfs > 0.1 : 
-                    if human_tfs - robot_tfs < 0.5:
-                        distance = np.linalg.norm(robot_pts - human_pts_arr[i])
-                        if distance < min_distance:
-                            min_distance = distance
-                            # min_index = np.where(robot_pts_arr == robot_pts)[0][0]
-                            min_index = j
-                            agent_index = i
-        return min_index , min_distance , agent_index
+    # def crossing_point_calc(self , robot_pts_arr , robot_tfs_arr , human_pts_arr , human_tfs_arr):
+    #     robot_pts_arr = np.array(robot_pts_arr)
+    #     human_pts_arr = np.array(human_pts_arr)
+    #     # human_tfs_arr = np.array(human_tfs_arr)
+    #     # robot_tfs_arr = np.array(robot_tfs_arr)
+    #     min_distance = 1000000
+    #     for j  ,[robot_tfs , robot_pts] in enumerate(zip(robot_tfs_arr , robot_pts_arr)):
+    #         for  i , human_tfs in enumerate(human_tfs_arr): 
+    #             if human_tfs - robot_tfs > 0.1 : 
+    #                 if human_tfs - robot_tfs < 0.5:
+    #                     distance = np.linalg.norm(robot_pts - human_pts_arr[i])
+    #                     if distance < min_distance:
+    #                         min_distance = distance
+    #                         # min_index = np.where(robot_pts_arr == robot_pts)[0][0]
+    #                         min_index = j
+    #                         agent_index = i
+    #     return min_index , min_distance , agent_index
+    def ecohan_cb (self , data)  :
+        if rospy.get_param('check_for_crossing' , False) :
+            time.sleep(0.2)
+            robot_crossing_point_list = rospy.wait_for_message('/move_base/HATebLocalPlannerROS/crossing_points' , PoseArray )
+            # print(robot_crossing_point_list)
+            if len(robot_crossing_point_list.poses) > 0 :
+                if len(self.agent_trajs_arr) > 0 : 
+                    try : 
+                        robot_crossing_point =  robot_crossing_point_list.poses[0] 
+                        robot_heading_angle = quat_to_euler(robot_crossing_point.orientation.z , robot_crossing_point.orientation.w)
+                        robot_pose = [robot_crossing_point.position.x , robot_crossing_point.position.y]
+                        crossing_info = rospy.wait_for_message('/move_base/HATebLocalPlannerROS/crossing_info' , CrossingInfo)
+                        agent_crossing_pose = self.agent_trajs_arr[0][1][crossing_info.indices[0]]
+                        agent_heading_angle = self.agent_trajs_arr[0][2][crossing_info.indices[0]]
+                        agent_next_pose_after_crossing_point = self.agent_trajs_arr[0][1][crossing_info.indices[0] + 1]
+                        agent_dx = agent_next_pose_after_crossing_point[0] - agent_crossing_pose[0]
+                        agent_dy = agent_next_pose_after_crossing_point[1] - agent_crossing_pose[1]
+                        agent_pose = [agent_crossing_pose[0] , agent_crossing_pose[1]]
+                        left_or_right , front_or_behind = get_pose_wrt_human(robot_pose , agent_pose , agent_dx , agent_dy)
+                        angle_of_robot_wrt_human = rad_to_deg2(robot_heading_angle - agent_heading_angle)
+                        direction = get_direction_from_position_dict(front_or_behind , left_or_right , angle_of_robot_wrt_human)
+                        self.attr_msg.direction_of_crossing = direction
+                        self.attr_msg.distance_while_crossing = self.crossing_info.distances[0] - (self.agent_radius + self.robot_radius)
+                        self.attr_msg.time_to_cross = self.crossing_info.times[0]
+                        self.attr_pub.publish(self.attr_msg)
+                        print(direction)
+                        print(self.attr_msg.distance_while_crossing)
+                        print(self.attr_msg.time_to_cross)
+                        self.image = np.ones((500 , 500 , 3) , dtype=np.uint8) * 255
+                        cv2.putText(self.image , str(angle_of_robot_wrt_human), (30 , 350) , cv2.FONT_HERSHEY_SIMPLEX , 1 , (0,0,0) , 2)
+                        cv2.putText(self.image , str(round(robot_heading_angle , 3)) + ' ' + str(round(agent_heading_angle , 3)) , (30 , 300) , cv2.FONT_HERSHEY_SIMPLEX , 1 , (0,0,0) , 2)
+                        cv2.putText(self.image , left_or_right + front_or_behind , (30 , 150) , cv2.FONT_HERSHEY_SIMPLEX , 1 , (0,0,0) , 2)
+                        cv2.putText(self.image , direction , (30 , 250) , cv2.FONT_HERSHEY_SIMPLEX , 1 , (0,0,0) , 2)
+                        self.image_msg = bridge.cv2_to_imgmsg(self.image ,  encoding="rgb8")
+                        self.image_pub.publish(self.image_msg)
+                        rospy.set_param('check_for_crossing' , False)
+                    except :
+                        pass
+            else : 
+                pass
+
 
     def robot_cb(self , data):
         self.robot_pts_arr = []
@@ -525,7 +667,7 @@ class cohan_attr:
             except : 
                 sync_error = True
         if not sync_error :
-            self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle]  , self.robot_tfs_arr[min_index] , min_distance)
+            # self.direction_of_crossing_static(self.robot_pts_arr, min_index , [agent_pose[0] , agent_pose[1] , agent_angle]  , self.robot_tfs_arr[min_index] , min_distance)
             time.sleep(0.1)
             self.distance_to_nearest_door(self.robot_pts_arr[min_index] , min_distance , agent_pose , self.robot_pts_arr[0] , self.robot_pts_arr)
             self.publish_marker(self.robot_pts_arr[min_index][0], self.robot_pts_arr[min_index][1])
