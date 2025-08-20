@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 import rospy
-from cohan_msgs.msg import Trajectory, AgentTrajectoryArray, TrackedAgents
+from cohan_msgs.msg import TrajectoryStamped, AgentTrajectoryArray, TrackedAgents
 import numpy as np
 from nav_msgs.msg import OccupancyGrid
 import scipy
@@ -182,7 +182,7 @@ class cohan_attr:
         rospy.Subscriber('/tracked_agents' , TrackedAgents , self.tracked_agents_cb)    
         rospy.Subscriber('/l515/color/image_raw' , Image , self.image_cb)
         # rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.robot_cb)
-        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , Trajectory , self.ecohan_cb)
+        rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_traj' , TrajectoryStamped , self.ecohan_cb)
         # rospy.Subscriber('/move_base/HATebLocalPlannerROS/local_plan' , Path , self.robot_plan_cb)
         rospy.Subscriber('/move_base/global_costmap/costmap' , OccupancyGrid , self.obs_cb)
         # rospy.Subscriber('/move_base/HATebLocalPlannerROS/agents_global_plans' , AgentPathArray , self.agents_global_plans_cb) 
